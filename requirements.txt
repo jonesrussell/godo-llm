@@ -4,7 +4,7 @@ uvicorn[standard]==0.24.0
 redis==5.0.1
 pydantic==2.5.0
 python-multipart==0.0.6
-transformers==4.36.0
+transformers==4.53.0
 accelerate==0.25.0
 huggingface-hub==0.19.4
 torch==2.1.1
