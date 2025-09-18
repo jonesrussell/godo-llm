@@ -8,6 +8,10 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 def run_command(cmd, check=True):
     """Run shell command with error handling"""
@@ -52,7 +56,20 @@ def setup_huggingface():
     """Setup Hugging Face authentication"""
     print("\nSetting up Hugging Face authentication...")
     
-    # Check if already logged in
+    # Check if token is available in environment
+    token = os.getenv('HUGGINGFACE_HUB_TOKEN')
+    if token:
+        print(f"✓ Found token in environment: {token[:10]}...")
+        try:
+            from huggingface_hub import login
+            login(token=token)
+            print("✓ Successfully authenticated with Hugging Face!")
+            return True
+        except Exception as e:
+            print(f"✗ Authentication failed: {e}")
+            return False
+    
+    # Check if already logged in via CLI
     result = run_command("huggingface-cli whoami", check=False)
     if result.returncode == 0:
         print("✓ Already logged in to Hugging Face")
@@ -61,7 +78,9 @@ def setup_huggingface():
     print("Please log in to Hugging Face:")
     print("1. Go to https://huggingface.co/settings/tokens")
     print("2. Create a new token with 'read' permissions")
-    print("3. Run: huggingface-cli login")
+    print("3. Set the token as environment variable:")
+    print("   export HUGGINGFACE_HUB_TOKEN='your_token_here'")
+    print("   OR create a .env file with: HUGGINGFACE_HUB_TOKEN=your_token_here")
     print("4. Accept the Llama 2 license at: https://huggingface.co/meta-llama/Llama-2-7b-chat-hf")
     
     input("Press Enter after completing the login process...")
