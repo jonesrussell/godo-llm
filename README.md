@@ -29,6 +29,24 @@ A complete local inference solution for Llama-2-7b on RTX 4060 with 8GB VRAM. Fe
 - **Storage**: 10GB+ free space for models
 - **Python**: 3.8+
 
+## 📁 Project Structure
+
+```
+llm-godo/
+├── main.py                 # 🚀 Core API application
+├── test_api.py            # 🧪 Comprehensive testing suite
+├── setup_model.py         # 📥 Model setup (with automatic fallbacks)
+├── setup_env.py           # 🔧 Environment configuration
+├── setup_environment.sh   # 🛠️ System dependencies setup
+├── requirements.txt       # 📦 Python dependencies
+├── env.example           # 📝 Environment template
+├── Dockerfile            # 🐳 Container setup
+├── docker-compose.yml    # 🐳 Multi-service setup
+├── README.md             # 📖 Documentation
+└── frontend/             # 🎨 Web interface
+    └── index.html
+```
+
 ## 🛠️ Quick Start
 
 ### 1. Clone and Setup
@@ -48,18 +66,17 @@ python setup_env.py
 ### 2. Download and Quantize Model
 
 ```bash
-# Option 1: Use the automated setup script
+# Automated setup with automatic fallbacks
 python setup_model.py
-
-# Option 2: Manual download (requires Hugging Face account)
-huggingface-cli login
-python -c "
-from huggingface_hub import snapshot_download
-snapshot_download('meta-llama/Llama-2-7b-chat-hf', cache_dir='./models/llama2-7b')
-"
 ```
 
-**Manual Setup** (if script fails):
+**What this does:**
+- ✅ Downloads Llama-2-7b (requires Hugging Face token)
+- ✅ Falls back to pre-converted GGUF model if main download fails
+- ✅ Falls back to TinyLlama test model if all else fails
+- ✅ Handles quantization and conversion automatically
+
+**Manual Setup** (if automated script fails):
 ```bash
 # 1. Login to Hugging Face
 huggingface-cli login
@@ -72,9 +89,6 @@ python -c "
 from huggingface_hub import snapshot_download
 snapshot_download('meta-llama/Llama-2-7b-chat-hf', cache_dir='./models/llama2-7b')
 "
-
-# 4. Convert to GGUF (requires llama.cpp)
-# See: https://github.com/ggerganov/llama.cpp
 ```
 
 ### 3. Start the API
@@ -377,6 +391,24 @@ async def metrics():
 3. **Scale Up**: Add Redis for caching, or deploy to cloud GPUs
 4. **Customize**: Modify prompts, parameters, and model settings
 5. **Integrate**: Use the API in your applications
+
+## 🚀 Streamlined Workflow Benefits
+
+### **Simplified Setup Process**
+- **3-command setup** instead of multiple complex steps
+- **Automatic fallbacks** ensure setup always succeeds
+- **Clear next steps** for each scenario
+
+### **Reliable Model Downloads**
+- **Primary**: Llama-2-7b (requires Hugging Face token)
+- **Fallback 1**: Pre-converted GGUF model (no conversion needed)
+- **Fallback 2**: TinyLlama test model (no license required)
+- **Graceful degradation** for different scenarios
+
+### **Clean Project Structure**
+- **4 essential scripts** instead of 8+ redundant files
+- **Consolidated functionality** with better error handling
+- **Streamlined documentation** and setup process
 
 ## 🚀 Ready to Go!
 
