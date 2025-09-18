@@ -258,12 +258,28 @@ async def model_info():
     if not llm:
         raise HTTPException(status_code=503, detail="Model not loaded")
     
-    return {
-        "model_path": llm.model_path,
-        "context_size": llm.n_ctx(),
-        "gpu_layers": llm.n_gpu_layers(),
-        "batch_size": llm.n_batch()
+    # Get model information safely
+    model_info = {
+        "model_path": os.getenv("MODEL_PATH", "Unknown"),
+        "context_size": int(os.getenv("MODEL_CONTEXT_SIZE", "2048")),
+        "gpu_layers": int(os.getenv("GPU_LAYERS", "20")),
+        "batch_size": int(os.getenv("MODEL_BATCH_SIZE", "512"))
     }
+    
+    # Try to get actual values from the model if methods exist
+    try:
+        if hasattr(llm, 'n_ctx'):
+            model_info["context_size"] = llm.n_ctx()
+    except:
+        pass
+    
+    try:
+        if hasattr(llm, 'n_batch'):
+            model_info["batch_size"] = llm.n_batch()
+    except:
+        pass
+    
+    return model_info
 
 if __name__ == "__main__":
     import uvicorn
