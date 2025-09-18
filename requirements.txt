@@ -9,3 +9,4 @@ accelerate>=0.25.0
 huggingface-hub>=0.19.4
 torch>=2.5.0
 sse-starlette>=1.6.5
+gguf>=0.5.0
