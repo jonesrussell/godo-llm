@@ -1,0 +1,215 @@
+# Docker Deployment Guide
+
+## Quick Start
+
+### Development
+```bash
+# Start with development overrides
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+
+# Run in background
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+```
+
+### Production
+```bash
+# Start with production overrides
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build
+
+# Run in background
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+```
+
+## Configuration Files
+
+### Base Configuration (`docker-compose.yml`)
+- Multi-service setup with Redis and LLM API
+- GPU support with NVIDIA runtime
+- Health checks and logging
+- Resource limits and reservations
+
+### Development Overrides (`docker-compose.dev.yml`)
+- Debug mode enabled
+- Hot reload for development
+- Source code mounting
+- Verbose logging
+
+### Production Overrides (`docker-compose.prod.yml`)
+- Production-optimized settings
+- Resource limits for performance
+- Enhanced logging configuration
+- Restart policies
+
+## Prerequisites
+
+### NVIDIA Docker Runtime
+```bash
+# Check if NVIDIA Docker is available
+docker run --rm --gpus all nvidia/cuda:11.8-base-ubuntu20.04 nvidia-smi
+
+# Install NVIDIA Docker runtime (if needed)
+distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
+curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
+curl -s -L https://nvidia.github.io/nvidia-docker/$distribution/nvidia-docker.list | sudo tee /etc/apt/sources.list.d/nvidia-docker.list
+sudo apt-get update && sudo apt-get install -y nvidia-docker2
+sudo systemctl restart docker
+```
+
+### Model Files
+Ensure your model files are in the `models/` directory:
+```bash
+ls -la models/llama2-7b-q4.gguf
+```
+
+## Service Management
+
+### Start Services
+```bash
+# Development
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+# Production
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up
+```
+
+### Stop Services
+```bash
+docker compose down
+```
+
+### View Logs
+```bash
+# All services
+docker compose logs -f
+
+# Specific service
+docker compose logs -f llm-api
+docker compose logs -f redis
+```
+
+### Restart Services
+```bash
+# Restart all
+docker compose restart
+
+# Restart specific service
+docker compose restart llm-api
+```
+
+## Health Checks
+
+### Service Health
+```bash
+# Check service status
+docker compose ps
+
+# Check health endpoints
+curl http://localhost:8000/health
+curl http://localhost:6379
+```
+
+### Resource Usage
+```bash
+# Monitor resource usage
+docker stats
+
+# Check GPU usage
+docker compose exec llm-api nvidia-smi
+```
+
+## Troubleshooting
+
+### Common Issues
+
+**GPU Not Available:**
+```bash
+# Check NVIDIA Docker runtime
+docker run --rm --gpus all nvidia/cuda:11.8-base-ubuntu20.04 nvidia-smi
+```
+
+**Model Not Found:**
+```bash
+# Check volume mounts
+docker compose exec llm-api ls -la /app/models
+
+# Copy models to container
+docker cp ./models llm-api:/app/
+```
+
+**Redis Connection Failed:**
+```bash
+# Check Redis service
+docker compose exec redis redis-cli ping
+
+# Check network connectivity
+docker compose exec llm-api ping redis
+```
+
+**Memory Issues:**
+```bash
+# Check memory usage
+docker stats
+
+# Adjust memory limits in docker-compose.prod.yml
+```
+
+### Performance Optimization
+
+**Resource Limits:**
+- Adjust memory limits in `docker-compose.prod.yml`
+- Configure CPU limits for optimal performance
+- Monitor GPU memory usage
+
+**Scaling:**
+```bash
+# Scale API service (if supported)
+docker compose up --scale llm-api=2
+```
+
+## Environment Variables
+
+### Required Variables
+- `MODEL_PATH`: Path to the model file
+- `GPU_LAYERS`: Number of GPU layers to use
+- `REDIS_URL`: Redis connection URL
+
+### Optional Variables
+- `DEBUG`: Enable debug mode (development)
+- `LOG_LEVEL`: Logging level (INFO, DEBUG, WARNING)
+- `API_HOST`: API host binding
+- `API_PORT`: API port
+
+## Security Considerations
+
+### Container Security
+- Non-root user execution
+- Minimal runtime dependencies
+- Regular base image updates
+
+### Network Security
+- Internal service communication
+- Exposed ports only for necessary services
+- Health check endpoints
+
+### Secrets Management
+```bash
+# Use Docker secrets for sensitive data
+echo "your_token_here" | docker secret create huggingface_token -
+```
+
+## Monitoring
+
+### Log Management
+- Centralized logging with JSON format
+- Log rotation and size limits
+- Structured logging for analysis
+
+### Metrics Collection
+- Health check endpoints
+- Resource usage monitoring
+- Performance metrics
+
+### Alerting
+- Service health monitoring
+- Resource threshold alerts
+- Error rate monitoring

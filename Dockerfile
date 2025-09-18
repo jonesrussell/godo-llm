@@ -1,16 +1,16 @@
 # Multi-stage build for local LLM inference
-FROM nvidia/cuda:11.8-devel-ubuntu22.04 as builder
+FROM python:3.11-slim AS builder
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
-    python3 \
-    python3-pip \
-    python3-dev \
     build-essential \
     cmake \
     git \
     wget \
     curl \
+    libgomp1 \
+    libgcc-s1 \
+    libstdc++6 \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
@@ -18,22 +18,17 @@ WORKDIR /app
 
 # Copy requirements and install Python dependencies
 COPY requirements.txt .
-RUN pip3 install --no-cache-dir -r requirements.txt
-
-# Copy application code
-COPY . .
-
-# Create models directory
-RUN mkdir -p models
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Production stage
-FROM nvidia/cuda:11.8-runtime-ubuntu22.04
+FROM python:3.11-slim
 
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y \
-    python3 \
-    python3-pip \
-    redis-server \
+    curl \
+    libgomp1 \
+    libgcc-s1 \
+    libstdc++6 \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user
@@ -45,21 +40,28 @@ RUN useradd -m -u 1000 llmuser && \
 WORKDIR /app
 
 # Copy Python packages from builder
-COPY --from=builder /usr/local/lib/python3.10/dist-packages /usr/local/lib/python3.10/dist-packages
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
-# Copy application code
-COPY --chown=llmuser:llmuser . .
+# Copy application code (excluding models via .dockerignore)
+COPY --chown=llmuser:llmuser main.py .
+COPY --chown=llmuser:llmuser test_api.py .
+COPY --chown=llmuser:llmuser setup_*.py .
+COPY --chown=llmuser:llmuser env.example .
+COPY --chown=llmuser:llmuser frontend/ ./frontend/
 
-# Switch to non-root user
-USER llmuser
+# Set environment variables for library paths
+ENV LD_LIBRARY_PATH=/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
 
-# Expose ports
-EXPOSE 8000 6379
+# Switch to non-root user (commented out for debugging)
+# USER llmuser
+
+# Expose port
+EXPOSE 8000
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Default command (can be overridden)
-CMD ["sh", "-c", "redis-server --daemonize yes && python3 main.py"]
+# Run application
+CMD ["python", "main.py"]
