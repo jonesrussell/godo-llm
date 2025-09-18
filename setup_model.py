@@ -99,7 +99,7 @@ def download_model():
     print("\nDownloading Llama-2-7b model...")
     
     model_id = "meta-llama/Llama-2-7b-chat-hf"
-    models_dir = Path("models")
+    models_dir = Path(os.getenv("MODELS_DIR", "models"))
     models_dir.mkdir(exist_ok=True)
     
     try:
@@ -115,6 +115,53 @@ def download_model():
         return True
     except Exception as e:
         print(f"✗ Download failed: {e}")
+        print("\n🔄 Trying alternative: Download pre-converted GGUF model...")
+        return download_gguf_model()
+
+def download_gguf_model():
+    """Download a pre-converted GGUF model as fallback"""
+    print("\n🔄 Downloading pre-converted GGUF model...")
+    
+    try:
+        from huggingface_hub import snapshot_download
+        
+        models_dir = Path(os.getenv("MODELS_DIR", "models"))
+        print("📥 Downloading Llama-2-7B-Chat-GGUF...")
+        snapshot_download(
+            repo_id="TheBloke/Llama-2-7B-Chat-GGUF",
+            cache_dir=str(models_dir / "llama2-7b-gguf"),
+            local_files_only=False,
+            allow_patterns="*.gguf"
+        )
+        print("✅ GGUF model downloaded successfully!")
+        print("📁 Model saved to: models/llama2-7b-gguf")
+        return True
+        
+    except Exception as e:
+        print(f"❌ GGUF download failed: {e}")
+        return False
+
+def download_test_model():
+    """Download TinyLlama for testing (no license required)"""
+    print("\n🧪 Downloading TinyLlama-1.1B for testing...")
+    
+    try:
+        from huggingface_hub import snapshot_download
+        
+        models_dir = Path(os.getenv("MODELS_DIR", "models"))
+        print("📥 Downloading TinyLlama-1.1B-Chat-v1.0...")
+        snapshot_download(
+            repo_id="TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+            cache_dir=str(models_dir / "tinyllama"),
+            local_files_only=False
+        )
+        print("✅ TinyLlama downloaded successfully!")
+        print("📁 Model saved to: models/tinyllama")
+        print("⚠️  Note: This downloads HuggingFace format, not GGUF.")
+        return True
+        
+    except Exception as e:
+        print(f"❌ TinyLlama download failed: {e}")
         return False
 
 def convert_to_gguf():
@@ -209,11 +256,29 @@ def main():
     
     # Setup Hugging Face
     if not setup_huggingface():
-        sys.exit(1)
+        print("\n🔄 Hugging Face setup failed. Trying test model...")
+        if download_test_model():
+            print("\n🎉 Test model setup complete!")
+            print("\nNext steps:")
+            print("1. Start Redis: redis-server")
+            print("2. Run the API: python main.py")
+            print("3. Test the endpoint: curl -X POST http://localhost:8000/generate -H 'Content-Type: application/json' -d '{\"prompt\": \"Hello, how are you?\"}'")
+            return
+        else:
+            sys.exit(1)
     
     # Download model
     if not download_model():
-        sys.exit(1)
+        print("\n🔄 Main model download failed. Trying test model...")
+        if download_test_model():
+            print("\n🎉 Test model setup complete!")
+            print("\nNext steps:")
+            print("1. Start Redis: redis-server")
+            print("2. Run the API: python main.py")
+            print("3. Test the endpoint: curl -X POST http://localhost:8000/generate -H 'Content-Type: application/json' -d '{\"prompt\": \"Hello, how are you?\"}'")
+            return
+        else:
+            sys.exit(1)
     
     # Convert to GGUF
     if not convert_to_gguf():

@@ -41,7 +41,7 @@ source venv/bin/activate
 pip install -r requirements.txt
 
 # Set up environment variables
-python create_env.py
+python setup_env.py
 # Edit .env file with your Hugging Face token
 ```
 
@@ -143,7 +143,7 @@ Create a `.env` file with your configuration:
 
 ```bash
 # Quick setup
-python create_env.py
+python setup_env.py
 
 # Or manually create .env file
 cp env.example .env
