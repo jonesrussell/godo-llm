@@ -36,12 +36,13 @@ ARG APP_GID=1000
 RUN groupadd -g ${APP_GID} ${APP_USER} && \
     useradd -m -u ${APP_UID} -g ${APP_GID} -s /bin/bash ${APP_USER}
 
-# Install runtime dependencies
+# Install runtime dependencies including OpenMP runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     libgomp1 \
     libgcc-s1 \
     libstdc++6 \
+    libc6-dev \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
@@ -56,16 +57,16 @@ COPY --from=builder --chown=${APP_USER}:${APP_USER} \
 
 # Update PATH to include user-installed packages
 ENV PATH=/home/${APP_USER}/.local/bin:$PATH
-ENV PYTHONPATH=/home/${APP_USER}/.local/lib/python3.11/site-packages:$PYTHONPATH
 
 # Set environment variables for better Python behavior
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONPATH=/home/${APP_USER}/.local/lib/python3.11/site-packages
 
-# Set library path environment variable
-ENV LD_LIBRARY_PATH=/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
+# Set library path environment variable and ensure proper linking
+ENV LD_LIBRARY_PATH=/home/${APP_USER}/.local/lib/python3.11/site-packages/llama_cpp/lib:/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu:/usr/lib
 
 # Copy application files with proper ownership
 # Use specific COPY commands for better caching
@@ -77,6 +78,15 @@ COPY --chown=${APP_USER}:${APP_USER} frontend/ ./frontend/
 
 # Switch to non-root user
 USER ${APP_USER}
+
+# Debug: Check library availability (remove this section after confirming it works)
+RUN echo "=== Library Debug Info ===" && \
+    find /home/${APP_USER}/.local -name "*.so*" -type f | head -10 && \
+    ldconfig -p | grep gomp && \
+    find /usr/lib -name "libgomp*" 2>/dev/null && \
+    find /lib -name "libgomp*" 2>/dev/null && \
+    echo "LD_LIBRARY_PATH: $LD_LIBRARY_PATH" && \
+    echo "=== End Debug Info ==="
 
 # Expose port
 EXPOSE 8000
