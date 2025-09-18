@@ -36,7 +36,7 @@ ARG APP_GID=1000
 RUN groupadd -g ${APP_GID} ${APP_USER} && \
     useradd -m -u ${APP_UID} -g ${APP_GID} -s /bin/bash ${APP_USER}
 
-# Install runtime dependencies including OpenMP runtime
+# Install runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     libgomp1 \
@@ -66,7 +66,7 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONPATH=/home/${APP_USER}/.local/lib/python3.11/site-packages
 
 # Set library path environment variable and ensure proper linking
-ENV LD_LIBRARY_PATH=/home/${APP_USER}/.local/lib/python3.11/site-packages/llama_cpp/lib:/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu:/usr/lib
+ENV LD_LIBRARY_PATH=/home/${APP_USER}/.local/lib/python3.11/site-packages/llama_cpp/lib:/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu
 
 # Copy application files with proper ownership
 # Use specific COPY commands for better caching
@@ -83,9 +83,6 @@ USER ${APP_USER}
 RUN echo "=== Library Debug Info ===" && \
     find /home/${APP_USER}/.local -name "*.so*" -type f | head -10 && \
     ldconfig -p | grep gomp && \
-    find /usr/lib -name "libgomp*" 2>/dev/null && \
-    find /lib -name "libgomp*" 2>/dev/null && \
-    echo "LD_LIBRARY_PATH: $LD_LIBRARY_PATH" && \
     echo "=== End Debug Info ==="
 
 # Expose port

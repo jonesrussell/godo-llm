@@ -1,64 +1,85 @@
 services:
   redis:
     image: redis:7-alpine
+    container_name: llm-redis
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes
+      - ./redis.conf:/usr/local/etc/redis/redis.conf:ro
+    command: redis-server /usr/local/etc/redis/redis.conf
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 30s
-      timeout: 10s
+      interval: 15s
+      timeout: 5s
       retries: 3
+      start_period: 10s
+    networks:
+      - llm_network
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
 
   llm-api:
-    build: .
+    build: 
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: llm-api
     ports:
-      - "8000:8000"
+      - "${API_PORT:-8000}:8000"
+    env_file:
+      - .env
     environment:
-      - MODEL_PATH=models/llama2-7b-q4.gguf
-      - GPU_LAYERS=20
-      - REDIS_URL=redis://redis:6379/0
-      - API_HOST=0.0.0.0
-      - API_PORT=8000
-      - DEBUG=false
-      - LOG_LEVEL=INFO
-      - LD_LIBRARY_PATH=/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu
+      # Override .env for container networking
+      - REDIS_URL=redis://redis:6379/${REDIS_DB:-0}
+      - REDIS_HOST=redis
     volumes:
-      - ./models:/app/models
-      - ./frontend:/app/frontend
+      - ./models:/app/models:ro
+      - ./logs:/app/logs
     depends_on:
       redis:
         condition: service_healthy
+    networks:
+      - llm_network
     deploy:
       resources:
         limits:
-          memory: 8G
+          memory: ${MEMORY_LIMIT:-8G}
         reservations:
-          memory: 4G
+          memory: ${MEMORY_RESERVATION:-4G}
           devices:
             - driver: nvidia
-              count: 1
+              count: ${GPU_COUNT:-1}
               capabilities: [gpu]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 60s
+      start_period: 90s
     logging:
       driver: "json-file"
       options:
-        max-size: "10m"
-        max-file: "3"
+        max-size: "25m"
+        max-file: "5"
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=100m
+
+networks:
+  llm_network:
+    driver: bridge
+    name: llm_network
 
 volumes:
   redis_data:
+    name: llm_redis_data

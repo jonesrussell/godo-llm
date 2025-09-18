@@ -1,12 +1,38 @@
-# Development overrides for Docker Compose
+# Development overrides - use with: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
 services:
   llm-api:
+    build:
+      target: production  # Still use production build but override runtime behavior
     environment:
       - DEBUG=true
       - LOG_LEVEL=DEBUG
       - RELOAD=true
     volumes:
-      - ./models:/app/models
-      - ./frontend:/app/frontend
-      - .:/app  # Mount source code for development
-    command: ["python3", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+      # Override read-only volume mounts for development
+      - ./models:/app/models:rw
+      - ./frontend:/app/frontend:rw
+      - .:/app/src:ro  # Mount source code as read-only for hot reload
+      - ./logs:/app/logs:rw
+    ports:
+      - "8000:8000"
+      - "5678:5678"  # Debugger port
+    command: ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/src"]
+    # Remove security restrictions for development
+    read_only: false
+    security_opt: []
+    deploy:
+      resources:
+        limits:
+          memory: 4G  # Reduced for development
+        reservations:
+          memory: 2G
+    healthcheck:
+      start_period: 30s  # Faster startup in dev
+
+  redis:
+    ports:
+      - "6379:6379"  # Expose Redis port for external tools
+    volumes:
+      - redis_data:/data
+      # No config override in dev for simplicity
+    command: redis-server --appendonly yes --loglevel debug
