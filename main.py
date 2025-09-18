@@ -3,6 +3,7 @@ import json
 import asyncio
 from typing import Optional, Dict, Any
 from contextlib import asynccontextmanager
+from dotenv import load_dotenv
 
 import redis
 from fastapi import FastAPI, HTTPException, Request
@@ -12,15 +13,31 @@ from sse_starlette.sse import EventSourceResponse
 from llama_cpp import Llama
 from pydantic import BaseModel
 
-# Redis connection for caching
-redis_client = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
+# Load environment variables from .env file
+load_dotenv()
+
+# Redis connection for caching (optional)
+try:
+    redis_host = os.getenv("REDIS_HOST", "localhost")
+    redis_port = int(os.getenv("REDIS_PORT", "6379"))
+    redis_db = int(os.getenv("REDIS_DB", "0"))
+    
+    redis_client = redis.Redis(host=redis_host, port=redis_port, db=redis_db, decode_responses=True)
+    redis_client.ping()  # Test connection
+    REDIS_AVAILABLE = True
+    print("✅ Redis connected successfully")
+except Exception as e:
+    print(f"⚠️  Redis not available: {e}")
+    print("   Running without caching...")
+    redis_client = None
+    REDIS_AVAILABLE = False
 
 class GenerateRequest(BaseModel):
     prompt: str
-    max_tokens: Optional[int] = 256
-    temperature: Optional[float] = 0.7
-    top_p: Optional[float] = 0.9
-    top_k: Optional[int] = 40
+    max_tokens: Optional[int] = int(os.getenv("MAX_TOKENS_DEFAULT", "256"))
+    temperature: Optional[float] = float(os.getenv("TEMPERATURE_DEFAULT", "0.7"))
+    top_p: Optional[float] = float(os.getenv("TOP_P_DEFAULT", "0.9"))
+    top_k: Optional[int] = int(os.getenv("TOP_K_DEFAULT", "40"))
     stop: Optional[list] = None
     stream: Optional[bool] = True
     cache_key: Optional[str] = None
@@ -45,13 +62,16 @@ async def lifespan(app: FastAPI):
     
     # Configure GPU layers (adjust based on your VRAM)
     n_gpu_layers = int(os.getenv("GPU_LAYERS", "20"))
+    n_ctx = int(os.getenv("MODEL_CONTEXT_SIZE", "2048"))
+    n_batch = int(os.getenv("MODEL_BATCH_SIZE", "512"))
     
     print(f"Loading model from {model_path} with {n_gpu_layers} GPU layers...")
+    print(f"Context size: {n_ctx}, Batch size: {n_batch}")
     llm = Llama(
         model_path=model_path,
         n_gpu_layers=n_gpu_layers,
-        n_ctx=2048,  # Context window
-        n_batch=512,  # Batch size for processing
+        n_ctx=n_ctx,  # Context window
+        n_batch=n_batch,  # Batch size for processing
         verbose=False
     )
     print("Model loaded successfully!")
@@ -66,7 +86,8 @@ app = FastAPI(
     title="Local LLM Inference API",
     description="FastAPI service for local LLM inference with streaming support",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
+    debug=os.getenv("DEBUG", "false").lower() == "true"
 )
 
 # Add CORS middleware
@@ -99,7 +120,7 @@ async def health_check():
     return {
         "status": "healthy",
         "model_loaded": llm is not None,
-        "redis_connected": redis_client.ping()
+        "redis_connected": REDIS_AVAILABLE and redis_client.ping() if redis_client else False
     }
 
 @app.post("/generate")
@@ -108,9 +129,14 @@ async def generate(request: GenerateRequest):
     if not llm:
         raise HTTPException(status_code=503, detail="Model not loaded")
     
-    # Check cache first
+    # Check cache first (if Redis is available)
     cache_key = request.cache_key or get_cache_key(request.prompt, request.dict())
-    cached_result = redis_client.get(cache_key)
+    cached_result = None
+    if REDIS_AVAILABLE and redis_client:
+        try:
+            cached_result = redis_client.get(cache_key)
+        except Exception:
+            pass
     
     if cached_result and not request.stream:
         return GenerateResponse(**json.loads(cached_result))
@@ -173,13 +199,17 @@ async def stream_generation(request: GenerateRequest, cache_key: str):
             })
         }
         
-        # Cache the result
-        result = GenerateResponse(
-            text=full_text,
-            tokens_generated=token_count,
-            generation_time=generation_time
-        )
-        redis_client.setex(cache_key, 3600, result.json())  # Cache for 1 hour
+        # Cache the result (if Redis is available)
+        if REDIS_AVAILABLE and redis_client:
+            try:
+                result = GenerateResponse(
+                    text=full_text,
+                    tokens_generated=token_count,
+                    generation_time=generation_time
+                )
+                redis_client.setex(cache_key, 3600, result.json())  # Cache for 1 hour
+            except Exception:
+                pass
         
     except Exception as e:
         yield {
@@ -213,8 +243,12 @@ async def generate_non_streaming(request: GenerateRequest, cache_key: str):
         generation_time=generation_time
     )
     
-    # Cache the result
-    redis_client.setex(cache_key, 3600, response.json())
+    # Cache the result (if Redis is available)
+    if REDIS_AVAILABLE and redis_client:
+        try:
+            redis_client.setex(cache_key, 3600, response.json())
+        except Exception:
+            pass
     
     return response
 
@@ -233,10 +267,16 @@ async def model_info():
 
 if __name__ == "__main__":
     import uvicorn
+    
+    host = os.getenv("API_HOST", "0.0.0.0")
+    port = int(os.getenv("API_PORT", "8000"))
+    workers = int(os.getenv("API_WORKERS", "1"))
+    reload = os.getenv("RELOAD", "false").lower() == "true"
+    
     uvicorn.run(
         "main:app",
-        host="0.0.0.0",
-        port=8000,
-        workers=1,
-        reload=False
+        host=host,
+        port=port,
+        workers=workers,
+        reload=reload
     )

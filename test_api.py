@@ -7,10 +7,18 @@ Run this to verify your setup is working correctly.
 import asyncio
 import json
 import time
+import os
 import requests
 from typing import Dict, Any
+from dotenv import load_dotenv
 
-API_BASE = "http://localhost:8000"
+# Load environment variables
+load_dotenv()
+
+# Get API configuration from environment
+API_HOST = os.getenv("API_HOST", "localhost")
+API_PORT = os.getenv("API_PORT", "8000")
+API_BASE = f"http://{API_HOST}:{API_PORT}"
 
 def test_health():
     """Test health endpoint"""
