@@ -1,0 +1,304 @@
+---
+globs: *.py
+description: FastAPI development guidelines and best practices for LLM inference API
+---
+
+# FastAPI Development Guidelines
+
+## API Design Principles
+
+### Endpoint Structure
+Follow RESTful conventions with clear, descriptive endpoint names:
+- `GET /health` - Health check and service status
+- `POST /generate` - Text generation with streaming support
+- `GET /models/info` - Model configuration and metadata
+- `GET /` - Root endpoint with service information
+
+### Request/Response Models
+Use Pydantic models for request validation and response serialization:
+
+```python
+class GenerateRequest(BaseModel):
+    prompt: str
+    max_tokens: Optional[int] = int(os.getenv("MAX_TOKENS_DEFAULT", "256"))
+    temperature: Optional[float] = float(os.getenv("TEMPERATURE_DEFAULT", "0.7"))
+    top_p: Optional[float] = float(os.getenv("TOP_P_DEFAULT", "0.9"))
+    top_k: Optional[int] = int(os.getenv("TOP_K_DEFAULT", "40"))
+    stop: Optional[list] = None
+    stream: Optional[bool] = True
+    cache_key: Optional[str] = None
+
+class GenerateResponse(BaseModel):
+    text: str
+    tokens_generated: int
+    generation_time: float
+```
+
+## Streaming Implementation
+
+### Server-Sent Events (SSE)
+Use `EventSourceResponse` for real-time token streaming:
+
+```python
+from sse_starlette.sse import EventSourceResponse
+
+@app.post("/generate")
+async def generate(request: GenerateRequest):
+    if request.stream:
+        return EventSourceResponse(
+            stream_generation(request, cache_key),
+            media_type="text/event-stream"
+        )
+```
+
+### Streaming Function Structure
+Implement proper error handling and event formatting:
+
+```python
+async def stream_generation(request: GenerateRequest, cache_key: str):
+    """Stream generation with Server-Sent Events"""
+    start_time = time.time()
+    full_text = ""
+    token_count = 0
+    
+    try:
+        for token in llm(...):
+            token_text = token["choices"][0]["text"]
+            full_text += token_text
+            token_count += 1
+            
+            # Send token as SSE event
+            yield {
+                "event": "token",
+                "data": json.dumps({
+                    "token": token_text,
+                    "full_text": full_text,
+                    "token_count": token_count
+                })
+            }
+            
+            await asyncio.sleep(0.01)  # Prevent overwhelming client
+        
+        # Send completion event
+        yield {
+            "event": "complete",
+            "data": json.dumps({
+                "full_text": full_text,
+                "token_count": token_count,
+                "generation_time": time.time() - start_time
+            })
+        }
+    except Exception as e:
+        yield {
+            "event": "error",
+            "data": json.dumps({"error": str(e)})
+        }
+```
+
+## Error Handling
+
+### HTTP Status Codes
+Use appropriate HTTP status codes:
+- `200` - Successful generation
+- `503` - Service unavailable (model not loaded)
+- `500` - Internal server error (generation failed)
+- `422` - Validation error (invalid request)
+
+```python
+if not llm:
+    raise HTTPException(status_code=503, detail="Model not loaded")
+
+try:
+    # Generation logic
+except Exception as e:
+    raise HTTPException(status_code=500, detail=f"Generation failed: {str(e)}")
+```
+
+### Graceful Degradation
+Handle optional services gracefully:
+
+```python
+# Redis connection with fallback
+try:
+    redis_client = redis.Redis(host=redis_host, port=redis_port, db=redis_db)
+    redis_client.ping()
+    REDIS_AVAILABLE = True
+except Exception as e:
+    print(f"⚠️  Redis not available: {e}")
+    REDIS_AVAILABLE = False
+```
+
+## Middleware Configuration
+
+### CORS Setup
+Configure CORS for frontend integration:
+
+```python
+from fastapi.middleware.cors import CORSMiddleware
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Configure appropriately for production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+```
+
+### Application Lifespan
+Use lifespan context manager for resource management:
+
+```python
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Initialize and cleanup resources"""
+    global llm
+    
+    # Initialize LLM model
+    llm = Llama(
+        model_path=model_path,
+        n_gpu_layers=n_gpu_layers,
+        n_ctx=n_ctx,
+        n_batch=n_batch,
+        verbose=False
+    )
+    
+    yield
+    
+    # Cleanup
+    if llm:
+        del llm
+
+app = FastAPI(
+    title="Local LLM Inference API",
+    description="FastAPI service for local LLM inference with streaming support",
+    version="1.0.0",
+    lifespan=lifespan
+)
+```
+
+## Performance Optimization
+
+### Caching Strategy
+Implement Redis caching for non-streaming responses:
+
+```python
+def get_cache_key(prompt: str, params: Dict[str, Any]) -> str:
+    """Generate cache key from prompt and parameters"""
+    cache_data = {
+        "prompt": prompt,
+        "temperature": params.get("temperature", 0.7),
+        "top_p": params.get("top_p", 0.9),
+        "top_k": params.get("top_k", 40),
+        "max_tokens": params.get("max_tokens", 256)
+    }
+    return f"llm_cache:{hash(json.dumps(cache_data, sort_keys=True))}"
+
+# Check cache before generation
+if REDIS_AVAILABLE and redis_client:
+    cached_result = redis_client.get(cache_key)
+    if cached_result and not request.stream:
+        return GenerateResponse(**json.loads(cached_result))
+```
+
+### Response Optimization
+- Use streaming for real-time user experience
+- Implement proper token counting
+- Include performance metrics in responses
+- Cache results for repeated requests
+
+## Health Checks
+
+### Health Endpoint
+Provide comprehensive health information:
+
+```python
+@app.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {
+        "status": "healthy",
+        "model_loaded": llm is not None,
+        "redis_connected": REDIS_AVAILABLE and redis_client.ping() if redis_client else False
+    }
+```
+
+### Model Information
+Expose model configuration for monitoring:
+
+```python
+@app.get("/models/info")
+async def model_info():
+    """Get information about the loaded model"""
+    if not llm:
+        raise HTTPException(status_code=503, detail="Model not loaded")
+    
+    return {
+        "model_path": llm.model_path,
+        "context_size": llm.n_ctx(),
+        "gpu_layers": llm.n_gpu_layers(),
+        "batch_size": llm.n_batch()
+    }
+```
+
+## Configuration Management
+
+### Environment Variables
+Use environment variables for all configuration:
+
+```python
+# Load environment variables
+load_dotenv()
+
+# Model Configuration
+model_path = os.getenv("MODEL_PATH", "models/llama2-7b-q4.gguf")
+n_gpu_layers = int(os.getenv("GPU_LAYERS", "20"))
+n_ctx = int(os.getenv("MODEL_CONTEXT_SIZE", "2048"))
+n_batch = int(os.getenv("MODEL_BATCH_SIZE", "512"))
+
+# API Configuration
+host = os.getenv("API_HOST", "0.0.0.0")
+port = int(os.getenv("API_PORT", "8000"))
+workers = int(os.getenv("API_WORKERS", "1"))
+```
+
+### Development vs Production
+Configure different settings for development and production:
+
+```python
+app = FastAPI(
+    title="Local LLM Inference API",
+    description="FastAPI service for local LLM inference with streaming support",
+    version="1.0.0",
+    lifespan=lifespan,
+    debug=os.getenv("DEBUG", "false").lower() == "true"
+)
+```
+
+## Testing Guidelines
+
+### API Testing
+Test all endpoints with various scenarios:
+
+```python
+async def test_generate_streaming():
+    """Test streaming text generation"""
+    response = await client.post("/generate", json={
+        "prompt": "Test prompt",
+        "stream": True
+    })
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "text/event-stream"
+
+async def test_generate_non_streaming():
+    """Test non-streaming text generation"""
+    response = await client.post("/generate", json={
+        "prompt": "Test prompt",
+        "stream": False
+    })
+    assert response.status_code == 200
+    data = response.json()
+    assert "text" in data
+    assert "tokens_generated" in data
+    assert "generation_time" in data
+```

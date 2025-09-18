@@ -1,0 +1,371 @@
+---
+globs: Dockerfile,docker-compose.yml,*.dockerfile
+description: Docker deployment guidelines and best practices for LLM inference pipeline
+---
+
+# Docker Deployment Guidelines
+
+## Docker Compose Architecture
+
+### Multi-Service Setup
+The [docker-compose.yml](mdc:docker-compose.yml) defines a complete stack:
+
+```yaml
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  llm-api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - MODEL_PATH=models/llama2-7b-q4.gguf
+      - GPU_LAYERS=20
+      - REDIS_URL=redis://redis:6379/0
+    volumes:
+      - ./models:/app/models
+      - ./frontend:/app/frontend
+    depends_on:
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+```
+
+### Service Dependencies
+- **Redis Service**: Provides caching layer with persistent storage
+- **LLM API Service**: Main application with GPU support
+- **Health Checks**: Ensure services are ready before starting dependent services
+
+## Dockerfile Best Practices
+
+### Multi-Stage Build
+Use multi-stage builds for optimized images:
+
+```dockerfile
+# Build stage
+FROM python:3.11-slim as builder
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    cmake \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Runtime stage
+FROM python:3.11-slim
+
+# Copy installed packages
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+
+# Copy application code
+COPY . /app
+WORKDIR /app
+
+# Expose port
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Run application
+CMD ["python", "main.py"]
+```
+
+### GPU Support
+Configure NVIDIA GPU support:
+
+```yaml
+deploy:
+  resources:
+    reservations:
+      devices:
+        - driver: nvidia
+          count: 1
+          capabilities: [gpu]
+```
+
+## Volume Management
+
+### Model Storage
+Mount model directory for persistence:
+
+```yaml
+volumes:
+  - ./models:/app/models
+  - ./frontend:/app/frontend
+```
+
+### Redis Persistence
+Configure Redis with persistent storage:
+
+```yaml
+volumes:
+  - redis_data:/data
+command: redis-server --appendonly yes
+```
+
+## Environment Configuration
+
+### Docker Environment Variables
+Override environment variables for containerized deployment:
+
+```yaml
+environment:
+  - MODEL_PATH=models/llama2-7b-q4.gguf
+  - GPU_LAYERS=20
+  - REDIS_URL=redis://redis:6379/0
+  - API_HOST=0.0.0.0
+  - API_PORT=8000
+```
+
+### Environment File Support
+Support `.env` files for configuration:
+
+```bash
+# Create .env file for Docker
+cp env.example .env
+# Edit .env with your configuration
+```
+
+## Health Checks
+
+### Service Health Monitoring
+Implement comprehensive health checks:
+
+```yaml
+healthcheck:
+  test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 60s
+```
+
+### Redis Health Check
+```yaml
+healthcheck:
+  test: ["CMD", "redis-cli", "ping"]
+  interval: 30s
+  timeout: 10s
+  retries: 3
+```
+
+## Deployment Commands
+
+### Development Deployment
+```bash
+# Build and start services
+docker-compose up --build
+
+# Run in background
+docker-compose up -d
+
+# View logs
+docker-compose logs -f llm-api
+```
+
+### Production Deployment
+```bash
+# Build production images
+docker-compose -f docker-compose.yml -f docker-compose.prod.yml up --build
+
+# Scale services
+docker-compose up --scale llm-api=3
+```
+
+### Service Management
+```bash
+# Stop services
+docker-compose down
+
+# Remove volumes
+docker-compose down -v
+
+# Restart specific service
+docker-compose restart llm-api
+```
+
+## Performance Optimization
+
+### Resource Limits
+Configure resource limits for optimal performance:
+
+```yaml
+deploy:
+  resources:
+    limits:
+      memory: 8G
+    reservations:
+      memory: 4G
+      devices:
+        - driver: nvidia
+          count: 1
+          capabilities: [gpu]
+```
+
+### Scaling Configuration
+Scale services based on load:
+
+```bash
+# Scale API service
+docker-compose up --scale llm-api=3
+
+# Scale with load balancer
+docker-compose -f docker-compose.yml -f docker-compose.scale.yml up
+```
+
+## Security Considerations
+
+### Container Security
+- Use non-root user in containers
+- Scan images for vulnerabilities
+- Keep base images updated
+- Use specific image tags
+
+### Network Security
+```yaml
+# Internal network for services
+networks:
+  llm-network:
+    driver: bridge
+
+# Expose only necessary ports
+ports:
+  - "8000:8000"  # API only
+```
+
+### Secrets Management
+```yaml
+# Use Docker secrets for sensitive data
+secrets:
+  huggingface_token:
+    file: ./secrets/huggingface_token.txt
+```
+
+## Monitoring and Logging
+
+### Log Management
+Configure centralized logging:
+
+```yaml
+logging:
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+```
+
+### Monitoring Integration
+- Use Prometheus for metrics collection
+- Configure Grafana dashboards
+- Set up alerting for service health
+
+## Troubleshooting
+
+### Common Docker Issues
+
+**GPU Not Available:**
+```bash
+# Check NVIDIA Docker runtime
+docker run --rm --gpus all nvidia/cuda:11.8-base-ubuntu20.04 nvidia-smi
+
+# Install NVIDIA Docker runtime
+distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
+curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
+curl -s -L https://nvidia.github.io/nvidia-docker/$distribution/nvidia-docker.list | sudo tee /etc/apt/sources.list.d/nvidia-docker.list
+sudo apt-get update && sudo apt-get install -y nvidia-docker2
+sudo systemctl restart docker
+```
+
+**Model Not Found:**
+```bash
+# Check volume mounts
+docker-compose exec llm-api ls -la /app/models
+
+# Copy models to container
+docker cp ./models llm-api:/app/
+```
+
+**Redis Connection Failed:**
+```bash
+# Check Redis service
+docker-compose exec redis redis-cli ping
+
+# Check network connectivity
+docker-compose exec llm-api ping redis
+```
+
+### Performance Debugging
+```bash
+# Monitor resource usage
+docker stats
+
+# Check GPU usage
+docker-compose exec llm-api nvidia-smi
+
+# View service logs
+docker-compose logs -f llm-api
+```
+
+## Production Deployment
+
+### Production Docker Compose
+Create production-specific configuration:
+
+```yaml
+# docker-compose.prod.yml
+version: '3.8'
+services:
+  llm-api:
+    restart: unless-stopped
+    environment:
+      - DEBUG=false
+      - LOG_LEVEL=INFO
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+        reservations:
+          memory: 4G
+```
+
+### CI/CD Integration
+```yaml
+# .github/workflows/docker.yml
+name: Docker Build and Deploy
+on:
+  push:
+    branches: [main]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Build Docker image
+        run: docker-compose build
+      - name: Run tests
+        run: docker-compose run llm-api python test_api.py
+```

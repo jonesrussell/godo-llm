@@ -1,0 +1,65 @@
+---
+alwaysApply: true
+description: Project structure and architecture guide for LLM inference pipeline
+---
+
+# Project Structure Guide
+
+This is a **Local LLM Inference Pipeline** optimized for RTX 4060 with 8GB VRAM, featuring FastAPI streaming, Redis caching, and Vue.js frontend.
+
+## Core Architecture
+
+The main entry point is [main.py](mdc:main.py), which provides:
+- FastAPI web service with streaming support
+- Llama-2-7b model inference via llama-cpp-python
+- Redis caching for performance optimization
+- Server-Sent Events for real-time token streaming
+
+## Key Files and Their Roles
+
+### Core Application
+- **[main.py](mdc:main.py)** - Main FastAPI application with LLM inference endpoints
+- **[test_api.py](mdc:test_api.py)** - Comprehensive testing suite for API endpoints
+- **[requirements.txt](mdc:requirements.txt)** - Python dependencies with CUDA support
+
+### Setup and Configuration
+- **[setup_model.py](mdc:setup_model.py)** - Automated model download and quantization setup
+- **[setup_env.py](mdc:setup_env.py)** - Environment configuration management
+- **[setup_environment.sh](mdc:setup_environment.sh)** - System dependencies setup script
+- **[env.example](mdc:env.example)** - Environment variables template
+
+### Deployment
+- **[docker-compose.yml](mdc:docker-compose.yml)** - Multi-service setup with Redis and LLM API
+- **[Dockerfile](mdc:Dockerfile)** - Container configuration for LLM service
+
+### Frontend
+- **[frontend/index.html](mdc:frontend/index.html)** - Vue.js web interface for testing
+
+## Directory Structure
+```
+llm-godo/
+├── main.py                 # 🚀 Core API application
+├── test_api.py            # 🧪 Comprehensive testing suite
+├── setup_model.py         # 📥 Model setup (with automatic fallbacks)
+├── setup_env.py           # 🔧 Environment configuration
+├── setup_environment.sh   # 🛠️ System dependencies setup
+├── requirements.txt       # 📦 Python dependencies
+├── env.example           # 📝 Environment template
+├── Dockerfile            # 🐳 Container setup
+├── docker-compose.yml    # 🐳 Multi-service setup
+├── README.md             # 📖 Documentation
+└── frontend/             # 🎨 Web interface
+    └── index.html
+```
+
+## Model Configuration
+- **Primary Model**: Llama-2-7b with Q4_K_M quantization
+- **Fallback Models**: Pre-converted GGUF and TinyLlama for testing
+- **GPU Optimization**: Configured for RTX 4060 (8GB VRAM) with 20 GPU layers
+- **Performance**: 15-20 tokens/second, 50-80ms latency per token
+
+## Service Architecture
+- **FastAPI Service**: Handles HTTP requests and streaming responses
+- **Redis Service**: Optional caching layer for improved performance
+- **Model Service**: llama-cpp-python for efficient local inference
+- **Frontend Service**: Vue.js interface for testing and interaction
