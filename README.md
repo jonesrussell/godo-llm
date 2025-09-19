@@ -57,7 +57,7 @@ llm-godo/
 ### 1. Clone and Setup
 
 ```bash
-git clone <your-repo>
+git clone https://github.com/jonesrussell/godo-llm.git
 cd llm-godo
 python3 -m venv venv
 source venv/bin/activate
