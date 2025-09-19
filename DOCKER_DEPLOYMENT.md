@@ -88,6 +88,16 @@ docker compose -f docker/docker-compose.yml -f docker/docker-compose.prod.yml up
 docker compose down
 ```
 
+### Manual Docker Build
+```bash
+# Build from docker directory with parent context
+cd docker
+docker buildx build -f Dockerfile --target production ..
+
+# Or build from project root
+docker buildx build -f docker/Dockerfile --target production .
+```
+
 ### View Logs
 ```bash
 # All services

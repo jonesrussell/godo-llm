@@ -112,18 +112,7 @@ sudo apt install -y python3-dev
 
 ### Docker Build Issues
 
-If building with Docker fails:
-
-```bash
-# Rebuild with clean cache
-docker build --no-cache -t llm-inference .
-
-# Check build logs
-docker build --progress=plain -t llm-inference .
-
-# Verify compiler in container
-docker run --rm llm-inference gcc-12 --version
-```
+**Note**: For comprehensive Docker troubleshooting and build issues, see [DOCKER_DEPLOYMENT.md](DOCKER_DEPLOYMENT.md).
 
 ## Performance Notes
 

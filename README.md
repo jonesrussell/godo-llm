@@ -130,16 +130,7 @@ python -m http.server 8080
 
 ## 📊 Performance Results
 
-With your **RTX 4060 (8GB VRAM)** - **TESTED AND VERIFIED**:
-
-- **Speed**: ~5.4 tokens/second (actual measured performance)
-- **Memory Usage**: ~6GB VRAM (optimized for 8GB)
-- **Context Window**: 2048 tokens
-- **Batch Size**: 512 tokens
-- **Quantization**: Q4_K_M (verified working)
-- **Caching**: 209x faster on repeated requests
-
-### RTX 4060 (8GB VRAM) Verified Benchmarks
+**RTX 4060 (8GB VRAM) - TESTED AND VERIFIED:**
 
 | Metric | Value | Status |
 |--------|-------|--------|
@@ -214,38 +205,17 @@ TOP_K_DEFAULT=40
 }
 ```
 
-## 🐳 Docker Deployment (Optional)
+## 🐳 Docker Deployment
 
+For comprehensive Docker setup, deployment, and troubleshooting, see [DOCKER_DEPLOYMENT.md](DOCKER_DEPLOYMENT.md).
+
+**Quick Start:**
 ```bash
-# Build and run with Docker Compose
-docker-compose -f docker/docker-compose.yml up --build
+# Development
+docker-compose -f docker/docker-compose.yml -f docker/docker-compose.dev.yml up --build
 
-# Or build manually
-docker build -t llm-inference .
-docker run --gpus all -p 8000:8000 -v $(pwd)/models:/app/models llm-inference
-```
-
-### Using Docker Compose (Recommended)
-
-```bash
-# Build and start all services
-docker-compose -f docker/docker-compose.yml up --build
-
-# Run in background
-docker-compose -f docker/docker-compose.yml up -d
-
-# View logs
-docker-compose -f docker/docker-compose.yml logs -f llm-api
-```
-
-### Manual Docker Build
-
-```bash
-# Build image
-docker build -t llm-inference .
-
-# Run with GPU support
-docker run --gpus all -p 8000:8000 -v $(pwd)/models:/app/models llm-inference
+# Production
+docker-compose -f docker/docker-compose.yml -f docker/docker-compose.prod.yml up --build
 ```
 
 ## 📡 API Endpoints
