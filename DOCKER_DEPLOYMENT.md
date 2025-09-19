@@ -57,6 +57,15 @@ sudo apt-get update && sudo apt-get install -y nvidia-docker2
 sudo systemctl restart docker
 ```
 
+### Build Dependencies
+The Dockerfile includes all necessary build dependencies:
+- **build-essential**: GCC, G++, Make
+- **cmake**: CMake build system
+- **gcc-12**: GCC 12 compiler (required for llama-cpp-python)
+- **g++-12**: G++ 12 compiler (required for llama-cpp-python)
+
+These are automatically installed during the Docker build process.
+
 ### Model Files
 Ensure your model files are in the `models/` directory:
 ```bash
@@ -167,6 +176,19 @@ docker compose exec llm-api ping redis
 docker stats
 
 # Adjust memory limits in docker-compose.prod.yml
+```
+
+**Build Issues (llama-cpp-python compilation):**
+```bash
+# Check if build dependencies are installed
+docker compose exec llm-api gcc-12 --version
+docker compose exec llm-api g++-12 --version
+
+# Rebuild with clean cache
+docker compose build --no-cache llm-api
+
+# Check compiler environment variables
+docker compose exec llm-api env | grep -E "(CC|CXX)"
 ```
 
 ### Performance Optimization

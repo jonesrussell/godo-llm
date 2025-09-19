@@ -30,6 +30,7 @@ A complete local inference solution for Llama-2-7b on RTX 4060 with 8GB VRAM. Fe
 - **RAM**: 16GB+ system RAM recommended
 - **Storage**: 10GB+ free space for models
 - **Python**: 3.8+
+- **Build Tools**: GCC 12, G++ 12, CMake, build-essential
 
 ## 📁 Project Structure
 
@@ -326,6 +327,21 @@ export GPU_LAYERS="15"
 
 # Reduce context size in main.py
 n_ctx=1024  # instead of 2048
+```
+
+**Build Issues (llama-cpp-python compilation):**
+```bash
+# Install required build dependencies
+sudo apt update
+sudo apt install -y build-essential cmake gcc-12 g++-12
+
+# Set compiler environment variables
+export CC=gcc-12
+export CXX=g++-12
+
+# Reinstall llama-cpp-python
+pip uninstall llama-cpp-python
+pip install llama-cpp-python --no-cache-dir
 ```
 
 **Redis Connection Errors:**

@@ -13,6 +13,8 @@ if command -v apt-get &> /dev/null; then
     sudo apt-get install -y \
         build-essential \
         cmake \
+        gcc-12 \
+        g++-12 \
         git \
         wget \
         curl \
@@ -71,6 +73,11 @@ pip install --upgrade pip
 # Install PyTorch first (with CUDA support)
 echo "🔥 Installing PyTorch with CUDA support..."
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+
+# Set compiler environment variables for llama-cpp-python
+echo "🔧 Setting compiler environment variables..."
+export CC=gcc-12
+export CXX=g++-12
 
 # Install other dependencies
 echo "📚 Installing other dependencies..."

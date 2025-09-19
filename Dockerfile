@@ -1,5 +1,5 @@
 # Multi-stage build for local LLM inference
-FROM python:3.11-slim AS builder
+FROM python:3.13-slim AS builder
 
 # Set build arguments for better caching
 ARG DEBIAN_FRONTEND=noninteractive
@@ -8,6 +8,8 @@ ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     cmake \
+    gcc-12 \
+    g++-12 \
     git \
     wget \
     curl \
@@ -17,6 +19,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Set working directory
 WORKDIR /app
 
+# Set compiler environment variables for llama-cpp-python
+ENV CC=gcc-12
+ENV CXX=g++-12
+
 # Copy and install Python dependencies with optimizations
 COPY requirements.txt .
 RUN pip install --no-cache-dir --disable-pip-version-check \
@@ -24,7 +30,7 @@ RUN pip install --no-cache-dir --disable-pip-version-check \
     -r requirements.txt
 
 # Production stage
-FROM python:3.11-slim AS production
+FROM python:3.13-slim AS production
 
 # Set build arguments
 ARG DEBIAN_FRONTEND=noninteractive
