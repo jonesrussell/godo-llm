@@ -16,7 +16,8 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 import redis.asyncio as redis
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from llama_cpp import Llama
 from pydantic import BaseModel, Field, validator
 from sse_starlette.sse import EventSourceResponse
@@ -360,9 +361,31 @@ async def general_exception_handler(request: Request, exc: Exception):
 
 
 # Routes
-@app.get("/", response_model=Dict[str, str])
+@app.get("/", response_class=HTMLResponse)
 async def root():
-    """Root endpoint."""
+    """Serve the Vue.js frontend."""
+    try:
+        with open("frontend/index.html", "r") as f:
+            return HTMLResponse(content=f.read(), status_code=200)
+    except FileNotFoundError:
+        return HTMLResponse(
+            content="""
+            <html>
+                <body>
+                    <h1>Local LLM Inference API</h1>
+                    <p>Status: Running</p>
+                    <p>Version: 1.0.0</p>
+                    <p>Frontend not found. Please check the frontend directory.</p>
+                </body>
+            </html>
+            """,
+            status_code=200
+        )
+
+
+@app.get("/api/info", response_model=Dict[str, str])
+async def api_info():
+    """API information endpoint."""
     return {
         "message": "Local LLM Inference API",
         "status": "running",

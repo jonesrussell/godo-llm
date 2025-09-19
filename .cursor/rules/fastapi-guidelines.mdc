@@ -12,7 +12,8 @@ Follow RESTful conventions with clear, descriptive endpoint names (all tested an
 - `GET /health` - Health check and service status ✅ Returns: `{"status":"healthy","model_loaded":true,"redis_connected":true}`
 - `POST /generate` - Text generation with streaming support ✅ Working at 5.4 tokens/sec
 - `GET /models/info` - Model configuration and metadata ✅ Returns: `{"model_path":"models/llama2-7b-q4.gguf","context_size":2048,"gpu_layers":20,"batch_size":512}`
-- `GET /` - Root endpoint with service information
+- `GET /` - Vue.js frontend interface ✅ Serves HTML frontend
+- `GET /api/info` - API information endpoint ✅ Returns JSON status
 
 ### Request/Response Models
 Use Pydantic models for request validation and response serialization:
