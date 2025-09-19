@@ -1,96 +1,327 @@
-import os
-import json
+"""
+Local LLM Inference API
+
+A FastAPI service for local LLM inference with streaming support, caching, and monitoring.
+"""
+
 import asyncio
-from typing import Optional, Dict, Any
+import hashlib
+import json
+import logging
+import os
+import time
 from contextlib import asynccontextmanager
-from dotenv import load_dotenv
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
-import redis
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import StreamingResponse
+import redis.asyncio as redis
+from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from sse_starlette.sse import EventSourceResponse
+from fastapi.responses import JSONResponse
 from llama_cpp import Llama
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, validator
+from sse_starlette.sse import EventSourceResponse
 
-# Load environment variables from .env file
-load_dotenv()
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
 
-# Redis connection for caching (optional)
-try:
-    redis_host = os.getenv("REDIS_HOST", "localhost")
-    redis_port = int(os.getenv("REDIS_PORT", "6379"))
-    redis_db = int(os.getenv("REDIS_DB", "0"))
+# Configuration
+class Config:
+    """Application configuration."""
     
-    redis_client = redis.Redis(host=redis_host, port=redis_port, db=redis_db, decode_responses=True)
-    redis_client.ping()  # Test connection
-    REDIS_AVAILABLE = True
-    print("✅ Redis connected successfully")
-except Exception as e:
-    print(f"⚠️  Redis not available: {e}")
-    print("   Running without caching...")
-    redis_client = None
-    REDIS_AVAILABLE = False
+    # Model settings
+    MODEL_PATH: str = os.getenv("MODEL_PATH", "models/llama2-7b-q4.gguf")
+    GPU_LAYERS: int = int(os.getenv("GPU_LAYERS", "20"))
+    MODEL_CONTEXT_SIZE: int = int(os.getenv("MODEL_CONTEXT_SIZE", "2048"))
+    MODEL_BATCH_SIZE: int = int(os.getenv("MODEL_BATCH_SIZE", "512"))
+    
+    # API settings
+    API_HOST: str = os.getenv("API_HOST", "0.0.0.0")
+    API_PORT: int = int(os.getenv("API_PORT", "8000"))
+    DEBUG: bool = os.getenv("DEBUG", "false").lower() == "true"
+    
+    # Redis settings
+    REDIS_HOST: str = os.getenv("REDIS_HOST", "localhost")
+    REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
+    REDIS_DB: int = int(os.getenv("REDIS_DB", "0"))
+    REDIS_URL: str = os.getenv("REDIS_URL", f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}")
+    
+    # Generation defaults
+    MAX_TOKENS_DEFAULT: int = int(os.getenv("MAX_TOKENS_DEFAULT", "256"))
+    TEMPERATURE_DEFAULT: float = float(os.getenv("TEMPERATURE_DEFAULT", "0.7"))
+    TOP_P_DEFAULT: float = float(os.getenv("TOP_P_DEFAULT", "0.9"))
+    TOP_K_DEFAULT: int = int(os.getenv("TOP_K_DEFAULT", "40"))
+    
+    # Cache settings
+    CACHE_TTL: int = int(os.getenv("CACHE_TTL", "3600"))  # 1 hour
+    
+    # Streaming settings
+    STREAM_DELAY: float = float(os.getenv("STREAM_DELAY", "0.01"))
 
+
+config = Config()
+
+# Pydantic models
 class GenerateRequest(BaseModel):
-    prompt: str
-    max_tokens: Optional[int] = int(os.getenv("MAX_TOKENS_DEFAULT", "256"))
-    temperature: Optional[float] = float(os.getenv("TEMPERATURE_DEFAULT", "0.7"))
-    top_p: Optional[float] = float(os.getenv("TOP_P_DEFAULT", "0.9"))
-    top_k: Optional[int] = int(os.getenv("TOP_K_DEFAULT", "40"))
-    stop: Optional[list] = None
-    stream: Optional[bool] = True
-    cache_key: Optional[str] = None
+    """Request model for text generation."""
+    
+    prompt: str = Field(..., min_length=1, max_length=4000, description="Input prompt")
+    max_tokens: Optional[int] = Field(
+        default=config.MAX_TOKENS_DEFAULT,
+        ge=1,
+        le=2048,
+        description="Maximum tokens to generate"
+    )
+    temperature: Optional[float] = Field(
+        default=config.TEMPERATURE_DEFAULT,
+        ge=0.0,
+        le=2.0,
+        description="Sampling temperature"
+    )
+    top_p: Optional[float] = Field(
+        default=config.TOP_P_DEFAULT,
+        ge=0.0,
+        le=1.0,
+        description="Top-p (nucleus) sampling"
+    )
+    top_k: Optional[int] = Field(
+        default=config.TOP_K_DEFAULT,
+        ge=1,
+        le=100,
+        description="Top-k sampling"
+    )
+    stop: Optional[List[str]] = Field(
+        default=None,
+        description="Stop sequences"
+    )
+    stream: Optional[bool] = Field(
+        default=True,
+        description="Enable streaming response"
+    )
+    cache_key: Optional[str] = Field(
+        default=None,
+        description="Custom cache key"
+    )
+    
+    @validator('stop')
+    def validate_stop_sequences(cls, v):
+        if v is not None and len(v) > 10:
+            raise ValueError("Maximum 10 stop sequences allowed")
+        return v
+
 
 class GenerateResponse(BaseModel):
+    """Response model for text generation."""
+    
     text: str
     tokens_generated: int
     generation_time: float
+    cached: bool = False
 
-# Global LLM instance
-llm = None
 
+class HealthResponse(BaseModel):
+    """Health check response model."""
+    
+    status: str
+    model_loaded: bool
+    redis_connected: bool
+    uptime: float
+
+
+class ModelInfoResponse(BaseModel):
+    """Model information response."""
+    
+    model_path: str
+    context_size: int
+    gpu_layers: int
+    batch_size: int
+    model_loaded: bool
+
+
+class ErrorResponse(BaseModel):
+    """Error response model."""
+    
+    detail: str
+    error_code: Optional[str] = None
+    timestamp: float
+
+
+# Global state
+class AppState:
+    """Application state container."""
+    
+    def __init__(self):
+        self.llm: Optional[Llama] = None
+        self.redis_client: Optional[redis.Redis] = None
+        self.start_time: float = time.time()
+        self.redis_available: bool = False
+    
+    @property
+    def uptime(self) -> float:
+        return time.time() - self.start_time
+
+
+app_state = AppState()
+
+
+# Redis connection manager
+class RedisManager:
+    """Manages Redis connections and operations."""
+    
+    @staticmethod
+    async def initialize() -> Optional[redis.Redis]:
+        """Initialize Redis connection."""
+        try:
+            client = redis.from_url(config.REDIS_URL, decode_responses=True)
+            await client.ping()
+            logger.info("Redis connected successfully")
+            app_state.redis_available = True
+            return client
+        except Exception as e:
+            logger.warning(f"Redis not available: {e}")
+            logger.info("Running without caching...")
+            app_state.redis_available = False
+            return None
+    
+    @staticmethod
+    async def close(client: Optional[redis.Redis]) -> None:
+        """Close Redis connection."""
+        if client:
+            try:
+                await client.close()
+                logger.info("Redis connection closed")
+            except Exception as e:
+                logger.error(f"Error closing Redis connection: {e}")
+
+
+# Cache utilities
+class CacheManager:
+    """Manages caching operations."""
+    
+    @staticmethod
+    def generate_cache_key(prompt: str, params: Dict[str, Any]) -> str:
+        """Generate deterministic cache key."""
+        cache_data = {
+            "prompt": prompt,
+            "temperature": params.get("temperature"),
+            "top_p": params.get("top_p"),
+            "top_k": params.get("top_k"),
+            "max_tokens": params.get("max_tokens")
+        }
+        content = json.dumps(cache_data, sort_keys=True)
+        return f"llm_cache:{hashlib.sha256(content.encode()).hexdigest()[:16]}"
+    
+    @staticmethod
+    async def get_cached_result(key: str) -> Optional[GenerateResponse]:
+        """Retrieve cached result."""
+        if not app_state.redis_available or not app_state.redis_client:
+            return None
+        
+        try:
+            cached_data = await app_state.redis_client.get(key)
+            if cached_data:
+                data = json.loads(cached_data)
+                data['cached'] = True
+                return GenerateResponse(**data)
+        except Exception as e:
+            logger.warning(f"Cache retrieval error: {e}")
+        
+        return None
+    
+    @staticmethod
+    async def cache_result(key: str, result: GenerateResponse) -> None:
+        """Cache generation result."""
+        if not app_state.redis_available or not app_state.redis_client:
+            return
+        
+        try:
+            await app_state.redis_client.setex(
+                key,
+                config.CACHE_TTL,
+                result.json(exclude={'cached'})
+            )
+        except Exception as e:
+            logger.warning(f"Cache storage error: {e}")
+
+
+# LLM manager
+class LLMManager:
+    """Manages LLM initialization and operations."""
+    
+    @staticmethod
+    def initialize_model() -> Llama:
+        """Initialize the LLM model."""
+        if not os.path.exists(config.MODEL_PATH):
+            raise FileNotFoundError(
+                f"Model not found at {config.MODEL_PATH}. "
+                "Please run setup_model.py first."
+            )
+        
+        logger.info(f"Loading model from {config.MODEL_PATH}")
+        logger.info(f"GPU layers: {config.GPU_LAYERS}, Context: {config.MODEL_CONTEXT_SIZE}")
+        
+        try:
+            llm = Llama(
+                model_path=config.MODEL_PATH,
+                n_gpu_layers=config.GPU_LAYERS,
+                n_ctx=config.MODEL_CONTEXT_SIZE,
+                n_batch=config.MODEL_BATCH_SIZE,
+                verbose=False
+            )
+            logger.info("Model loaded successfully")
+            return llm
+        except Exception as e:
+            logger.error(f"Failed to load model: {e}")
+            raise
+
+
+# Application lifespan
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize and cleanup resources"""
-    global llm
+    """Manage application lifespan."""
+    # Startup
+    logger.info("Starting LLM API service...")
     
-    # Initialize LLM
-    model_path = os.getenv("MODEL_PATH", "models/llama2-7b-q4.gguf")
-    if not os.path.exists(model_path):
-        raise FileNotFoundError(f"Model not found at {model_path}. Please run setup_model.py first.")
-    
-    # Configure GPU layers (adjust based on your VRAM)
-    n_gpu_layers = int(os.getenv("GPU_LAYERS", "20"))
-    n_ctx = int(os.getenv("MODEL_CONTEXT_SIZE", "2048"))
-    n_batch = int(os.getenv("MODEL_BATCH_SIZE", "512"))
-    
-    print(f"Loading model from {model_path} with {n_gpu_layers} GPU layers...")
-    print(f"Context size: {n_ctx}, Batch size: {n_batch}")
-    llm = Llama(
-        model_path=model_path,
-        n_gpu_layers=n_gpu_layers,
-        n_ctx=n_ctx,  # Context window
-        n_batch=n_batch,  # Batch size for processing
-        verbose=False
-    )
-    print("Model loaded successfully!")
+    try:
+        # Initialize Redis
+        app_state.redis_client = await RedisManager.initialize()
+        
+        # Initialize LLM
+        app_state.llm = LLMManager.initialize_model()
+        
+        logger.info("Service startup completed successfully")
+        
+    except Exception as e:
+        logger.error(f"Startup failed: {e}")
+        raise
     
     yield
     
     # Cleanup
-    if llm:
-        del llm
+    logger.info("Shutting down service...")
+    
+    if app_state.redis_client:
+        await RedisManager.close(app_state.redis_client)
+    
+    if app_state.llm:
+        del app_state.llm
+    
+    logger.info("Service shutdown completed")
 
+
+# FastAPI app
 app = FastAPI(
     title="Local LLM Inference API",
     description="FastAPI service for local LLM inference with streaming support",
     version="1.0.0",
     lifespan=lifespan,
-    debug=os.getenv("DEBUG", "false").lower() == "true"
+    debug=config.DEBUG,
 )
 
-# Add CORS middleware
+# Middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -99,49 +330,105 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-def get_cache_key(prompt: str, params: Dict[str, Any]) -> str:
-    """Generate cache key from prompt and parameters"""
-    cache_data = {
-        "prompt": prompt,
-        "temperature": params.get("temperature", 0.7),
-        "top_p": params.get("top_p", 0.9),
-        "top_k": params.get("top_k", 40),
-        "max_tokens": params.get("max_tokens", 256)
-    }
-    return f"llm_cache:{hash(json.dumps(cache_data, sort_keys=True))}"
 
-@app.get("/")
+# Exception handlers
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """Handle HTTP exceptions."""
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=ErrorResponse(
+            detail=exc.detail,
+            error_code=f"HTTP_{exc.status_code}",
+            timestamp=time.time()
+        ).dict()
+    )
+
+
+@app.exception_handler(Exception)
+async def general_exception_handler(request: Request, exc: Exception):
+    """Handle general exceptions."""
+    logger.error(f"Unhandled exception: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content=ErrorResponse(
+            detail="Internal server error",
+            error_code="INTERNAL_ERROR",
+            timestamp=time.time()
+        ).dict()
+    )
+
+
+# Routes
+@app.get("/", response_model=Dict[str, str])
 async def root():
-    return {"message": "Local LLM Inference API", "status": "running"}
-
-@app.get("/health")
-async def health_check():
-    """Health check endpoint"""
+    """Root endpoint."""
     return {
-        "status": "healthy",
-        "model_loaded": llm is not None,
-        "redis_connected": REDIS_AVAILABLE and redis_client.ping() if redis_client else False
+        "message": "Local LLM Inference API",
+        "status": "running",
+        "version": "1.0.0"
     }
+
+
+@app.get("/health", response_model=HealthResponse)
+async def health_check():
+    """Health check endpoint."""
+    redis_connected = False
+    
+    if app_state.redis_available and app_state.redis_client:
+        try:
+            await app_state.redis_client.ping()
+            redis_connected = True
+        except Exception:
+            redis_connected = False
+    
+    return HealthResponse(
+        status="healthy" if app_state.llm else "degraded",
+        model_loaded=app_state.llm is not None,
+        redis_connected=redis_connected,
+        uptime=app_state.uptime
+    )
+
+
+@app.get("/models/info", response_model=ModelInfoResponse)
+async def model_info():
+    """Get model information."""
+    if not app_state.llm:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Model not loaded"
+        )
+    
+    return ModelInfoResponse(
+        model_path=config.MODEL_PATH,
+        context_size=config.MODEL_CONTEXT_SIZE,
+        gpu_layers=config.GPU_LAYERS,
+        batch_size=config.MODEL_BATCH_SIZE,
+        model_loaded=True
+    )
+
 
 @app.post("/generate")
 async def generate(request: GenerateRequest):
-    """Generate text with optional caching"""
-    if not llm:
-        raise HTTPException(status_code=503, detail="Model not loaded")
+    """Generate text with optional caching and streaming."""
+    if not app_state.llm:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Model not loaded"
+        )
     
-    # Check cache first (if Redis is available)
-    cache_key = request.cache_key or get_cache_key(request.prompt, request.dict())
-    cached_result = None
-    if REDIS_AVAILABLE and redis_client:
-        try:
-            cached_result = redis_client.get(cache_key)
-        except Exception:
-            pass
+    # Generate cache key
+    cache_key = request.cache_key or CacheManager.generate_cache_key(
+        request.prompt, request.dict()
+    )
     
-    if cached_result and not request.stream:
-        return GenerateResponse(**json.loads(cached_result))
+    # Check cache for non-streaming requests
+    if not request.stream:
+        cached_result = await CacheManager.get_cached_result(cache_key)
+        if cached_result:
+            return cached_result
     
-    # Generate new content
+    # Generate content
     try:
         if request.stream:
             return EventSourceResponse(
@@ -151,17 +438,24 @@ async def generate(request: GenerateRequest):
         else:
             return await generate_non_streaming(request, cache_key)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Generation failed: {str(e)}")
+        logger.error(f"Generation failed: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Generation failed: {str(e)}"
+        )
 
-async def stream_generation(request: GenerateRequest, cache_key: str):
-    """Stream generation with Server-Sent Events"""
-    import time
+
+async def stream_generation(
+    request: GenerateRequest, 
+    cache_key: str
+) -> AsyncGenerator[Dict[str, str], None]:
+    """Stream text generation with Server-Sent Events."""
     start_time = time.time()
     full_text = ""
     token_count = 0
     
     try:
-        for token in llm(
+        for token in app_state.llm(
             prompt=request.prompt,
             max_tokens=request.max_tokens,
             temperature=request.temperature,
@@ -175,7 +469,7 @@ async def stream_generation(request: GenerateRequest, cache_key: str):
             full_text += token_text
             token_count += 1
             
-            # Send token as SSE event
+            # Send token event
             yield {
                 "event": "token",
                 "data": json.dumps({
@@ -185,8 +479,8 @@ async def stream_generation(request: GenerateRequest, cache_key: str):
                 })
             }
             
-            # Small delay to prevent overwhelming the client
-            await asyncio.sleep(0.01)
+            # Prevent overwhelming the client
+            await asyncio.sleep(config.STREAM_DELAY)
         
         # Send completion event
         generation_time = time.time() - start_time
@@ -199,100 +493,69 @@ async def stream_generation(request: GenerateRequest, cache_key: str):
             })
         }
         
-        # Cache the result (if Redis is available)
-        if REDIS_AVAILABLE and redis_client:
-            try:
-                result = GenerateResponse(
-                    text=full_text,
-                    tokens_generated=token_count,
-                    generation_time=generation_time
-                )
-                redis_client.setex(cache_key, 3600, result.json())  # Cache for 1 hour
-            except Exception:
-                pass
+        # Cache the result
+        result = GenerateResponse(
+            text=full_text,
+            tokens_generated=token_count,
+            generation_time=generation_time
+        )
+        await CacheManager.cache_result(cache_key, result)
         
     except Exception as e:
+        logger.error(f"Streaming error: {e}", exc_info=True)
         yield {
             "event": "error",
             "data": json.dumps({"error": str(e)})
         }
 
-async def generate_non_streaming(request: GenerateRequest, cache_key: str):
-    """Generate text without streaming"""
-    import time
+
+async def generate_non_streaming(
+    request: GenerateRequest, 
+    cache_key: str
+) -> GenerateResponse:
+    """Generate text without streaming."""
     start_time = time.time()
     
-    result = llm(
-        prompt=request.prompt,
-        max_tokens=request.max_tokens,
-        temperature=request.temperature,
-        top_p=request.top_p,
-        top_k=request.top_k,
-        stop=request.stop or [],
-        echo=False,
-        stream=False
-    )
-    
-    generation_time = time.time() - start_time
-    text = result["choices"][0]["text"]
-    token_count = len(text.split())  # Approximate token count
-    
-    response = GenerateResponse(
-        text=text,
-        tokens_generated=token_count,
-        generation_time=generation_time
-    )
-    
-    # Cache the result (if Redis is available)
-    if REDIS_AVAILABLE and redis_client:
-        try:
-            redis_client.setex(cache_key, 3600, response.json())
-        except Exception:
-            pass
-    
-    return response
+    try:
+        result = app_state.llm(
+            prompt=request.prompt,
+            max_tokens=request.max_tokens,
+            temperature=request.temperature,
+            top_p=request.top_p,
+            top_k=request.top_k,
+            stop=request.stop or [],
+            echo=False,
+            stream=False
+        )
+        
+        generation_time = time.time() - start_time
+        text = result["choices"][0]["text"]
+        # Better token counting - this is approximate
+        token_count = len(text.split())
+        
+        response = GenerateResponse(
+            text=text,
+            tokens_generated=token_count,
+            generation_time=generation_time
+        )
+        
+        # Cache the result
+        await CacheManager.cache_result(cache_key, response)
+        
+        return response
+        
+    except Exception as e:
+        logger.error(f"Non-streaming generation error: {e}", exc_info=True)
+        raise
 
-@app.get("/models/info")
-async def model_info():
-    """Get information about the loaded model"""
-    if not llm:
-        raise HTTPException(status_code=503, detail="Model not loaded")
-    
-    # Get model information safely
-    model_info = {
-        "model_path": os.getenv("MODEL_PATH", "Unknown"),
-        "context_size": int(os.getenv("MODEL_CONTEXT_SIZE", "2048")),
-        "gpu_layers": int(os.getenv("GPU_LAYERS", "20")),
-        "batch_size": int(os.getenv("MODEL_BATCH_SIZE", "512"))
-    }
-    
-    # Try to get actual values from the model if methods exist
-    try:
-        if hasattr(llm, 'n_ctx'):
-            model_info["context_size"] = llm.n_ctx()
-    except:
-        pass
-    
-    try:
-        if hasattr(llm, 'n_batch'):
-            model_info["batch_size"] = llm.n_batch()
-    except:
-        pass
-    
-    return model_info
 
 if __name__ == "__main__":
     import uvicorn
     
-    host = os.getenv("API_HOST", "0.0.0.0")
-    port = int(os.getenv("API_PORT", "8000"))
-    workers = int(os.getenv("API_WORKERS", "1"))
-    reload = os.getenv("RELOAD", "false").lower() == "true"
-    
     uvicorn.run(
         "main:app",
-        host=host,
-        port=port,
-        workers=workers,
-        reload=reload
+        host=config.API_HOST,
+        port=config.API_PORT,
+        reload=config.DEBUG,
+        log_level="debug" if config.DEBUG else "info"
     )
