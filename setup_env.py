@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """
-Script to help set up environment variables for the LLM inference pipeline.
-This creates a .env file with default values that users can customize.
+Script to help set up environment variables and system dependencies for the LLM inference pipeline.
+This creates a .env file with default values and installs required system packages.
 """
 
 import os
+import subprocess
+import sys
+import platform
 from pathlib import Path
+from typing import List, Tuple
 
 def create_env_file():
     """Create a .env file with default values"""
@@ -108,6 +112,101 @@ def show_env_help():
     print("  DEBUG - Enable debug mode (default: false)")
     print("  RELOAD - Enable auto-reload (default: false)")
 
+def install_system_dependencies() -> bool:
+    """Install system dependencies based on the operating system"""
+    system = platform.system().lower()
+    
+    if system == "linux":
+        return _install_linux_dependencies()
+    elif system == "darwin":  # macOS
+        return _install_macos_dependencies()
+    else:
+        print(f"⚠️  Unsupported operating system: {system}")
+        print("Please install dependencies manually:")
+        print("- build-essential (gcc, g++, make)")
+        print("- cmake")
+        print("- python3-dev")
+        print("- redis-server")
+        return False
+
+def _install_linux_dependencies() -> bool:
+    """Install dependencies on Linux systems"""
+    print("🐧 Installing Linux dependencies...")
+    
+    # Check if apt-get is available (Ubuntu/Debian)
+    if subprocess.run(["which", "apt-get"], capture_output=True).returncode == 0:
+        return _install_apt_dependencies()
+    # Check if yum is available (RHEL/CentOS)
+    elif subprocess.run(["which", "yum"], capture_output=True).returncode == 0:
+        return _install_yum_dependencies()
+    else:
+        print("❌ Package manager not found. Please install dependencies manually.")
+        return False
+
+def _install_apt_dependencies() -> bool:
+    """Install dependencies using apt-get"""
+    packages = [
+        "build-essential", "cmake", "gcc-12", "g++-12", "git", "wget", "curl",
+        "python3-dev", "python3-pip", "python3-venv", "redis-server"
+    ]
+    
+    try:
+        print("📦 Updating package list...")
+        subprocess.run(["sudo", "apt-get", "update"], check=True)
+        
+        print("📦 Installing packages...")
+        subprocess.run(["sudo", "apt-get", "install", "-y"] + packages, check=True)
+        
+        print("✅ Linux dependencies installed successfully!")
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Failed to install dependencies: {e}")
+        return False
+
+def _install_yum_dependencies() -> bool:
+    """Install dependencies using yum"""
+    packages = [
+        "cmake", "git", "wget", "curl", "python3-devel", "python3-pip", "redis"
+    ]
+    
+    try:
+        print("📦 Installing development tools...")
+        subprocess.run(["sudo", "yum", "groupinstall", "-y", "Development Tools"], check=True)
+        
+        print("📦 Installing packages...")
+        subprocess.run(["sudo", "yum", "install", "-y"] + packages, check=True)
+        
+        print("✅ Linux dependencies installed successfully!")
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Failed to install dependencies: {e}")
+        return False
+
+def _install_macos_dependencies() -> bool:
+    """Install dependencies on macOS"""
+    print("🍎 macOS detected. Please install dependencies manually:")
+    print("1. Install Homebrew: /bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\"")
+    print("2. Install packages: brew install cmake gcc redis")
+    return False
+
+def validate_environment() -> bool:
+    """Validate that required tools are available"""
+    print("🔍 Validating environment...")
+    
+    required_commands = ["python3", "pip", "cmake", "gcc-12", "g++-12"]
+    missing_commands = []
+    
+    for cmd in required_commands:
+        if subprocess.run(["which", cmd], capture_output=True).returncode != 0:
+            missing_commands.append(cmd)
+    
+    if missing_commands:
+        print(f"❌ Missing required commands: {', '.join(missing_commands)}")
+        return False
+    
+    print("✅ All required commands are available!")
+    return True
+
 def main():
     """Main setup function"""
     print("🔧 Environment Setup for LLM Inference Pipeline")
@@ -116,24 +215,32 @@ def main():
     
     while True:
         print("Choose an option:")
-        print("1. Create .env file with default values")
-        print("2. Show environment variables help")
-        print("3. Exit")
+        print("1. Install system dependencies")
+        print("2. Create .env file with default values")
+        print("3. Validate environment")
+        print("4. Show environment variables help")
+        print("5. Exit")
         print("")
         
-        choice = input("Enter your choice (1-3): ").strip()
+        choice = input("Enter your choice (1-5): ").strip()
         
         if choice == "1":
+            install_system_dependencies()
+            print("")
+        elif choice == "2":
             create_env_file()
             break
-        elif choice == "2":
+        elif choice == "3":
+            validate_environment()
+            print("")
+        elif choice == "4":
             show_env_help()
             print("")
-        elif choice == "3":
+        elif choice == "5":
             print("👋 Goodbye!")
             break
         else:
-            print("❌ Invalid choice. Please enter 1, 2, or 3.")
+            print("❌ Invalid choice. Please enter 1-5.")
 
 if __name__ == "__main__":
     main()
