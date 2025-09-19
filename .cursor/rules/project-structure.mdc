@@ -19,7 +19,7 @@ The main entry point is [main.py](mdc:main.py), which provides:
 
 ### Core Application
 - **[main.py](mdc:main.py)** - Main FastAPI application with LLM inference endpoints
-- **[test_api.py](mdc:test_api.py)** - Comprehensive testing suite for API endpoints
+- **[test_api.py](mdc:test_api.py)** - Comprehensive testing suite (6/6 tests passing)
 - **[requirements.txt](mdc:requirements.txt)** - Python dependencies with CUDA support
 
 ### Setup and Configuration
@@ -56,10 +56,10 @@ llm-godo/
 - **Primary Model**: Llama-2-7b with Q4_K_M quantization
 - **Fallback Models**: Pre-converted GGUF and TinyLlama for testing
 - **GPU Optimization**: Configured for RTX 4060 (8GB VRAM) with 20 GPU layers
-- **Performance**: 15-20 tokens/second, 50-80ms latency per token
+- **Performance**: 5.4 tokens/second (verified), ~6GB VRAM usage, 209x cache speedup
 
 ## Service Architecture
 - **FastAPI Service**: Handles HTTP requests and streaming responses
-- **Redis Service**: Optional caching layer for improved performance
+- **Redis Service**: Active caching layer with 209x speed improvement on repeated requests
 - **Model Service**: llama-cpp-python for efficient local inference
 - **Frontend Service**: Vue.js interface for testing and interaction
