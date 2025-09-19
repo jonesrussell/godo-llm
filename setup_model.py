@@ -86,9 +86,10 @@ def check_dependencies():
         print("Please run: pip install -r requirements.txt")
         return False
     
-    # Check if llama.cpp is available
+    # Check if llama.cpp is available - use the same Python interpreter as this script
     try:
-        result = run_command("python -c 'import llama_cpp'", check=False)
+        python_cmd = sys.executable
+        result = run_command(f"{python_cmd} -c 'import llama_cpp'", check=False)
         if result.returncode != 0:
             print("✗ llama-cpp-python not installed")
             print("Please run: pip install llama-cpp-python[cuda]")
@@ -252,7 +253,7 @@ def convert_to_gguf():
     model_path = "models/llama2-7b/meta-llama--Llama-2-7b-chat-hf"
     output_path = "models/llama2-7b-chat.gguf"
     
-    cmd = f"python convert_hf_to_gguf.py {model_path} --outfile {output_path}"
+    cmd = f"{sys.executable} convert_hf_to_gguf.py {model_path} --outfile {output_path}"
     result = run_command(cmd, check=False)
     
     if result.returncode == 0 and os.path.exists(output_path):
@@ -397,7 +398,7 @@ def main():
         print("\n🎉 Existing models found!")
         print("\nNext steps:")
         print("1. Start Redis: redis-server")
-        print("2. Run the API: python main.py")
+        print("2. Run the API: python3 main.py")
         print("3. Test the endpoint: curl -X POST http://localhost:8000/generate -H 'Content-Type: application/json' -d '{\"prompt\": \"Hello, how are you?\"}'")
         return
     
@@ -408,7 +409,7 @@ def main():
             print("\n🎉 Test model setup complete!")
             print("\nNext steps:")
             print("1. Start Redis: redis-server")
-            print("2. Run the API: python main.py")
+            print("2. Run the API: python3 main.py")
             print("3. Test the endpoint: curl -X POST http://localhost:8000/generate -H 'Content-Type: application/json' -d '{\"prompt\": \"Hello, how are you?\"}'")
             return
         else:
@@ -421,7 +422,7 @@ def main():
             print("\n🎉 Test model setup complete!")
             print("\nNext steps:")
             print("1. Start Redis: redis-server")
-            print("2. Run the API: python main.py")
+            print("2. Run the API: python3 main.py")
             print("3. Test the endpoint: curl -X POST http://localhost:8000/generate -H 'Content-Type: application/json' -d '{\"prompt\": \"Hello, how are you?\"}'")
             return
         else:

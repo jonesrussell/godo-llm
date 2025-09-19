@@ -180,6 +180,7 @@ def test_caching():
     payload = {
         "prompt": "What is the capital of France?",
         "max_tokens": 20,
+        "temperature": 0.1,  # Use deterministic temperature for caching
         "stream": False
     }
     

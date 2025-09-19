@@ -11,6 +11,7 @@ import logging
 import os
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
 import redis.asyncio as redis
@@ -33,15 +34,15 @@ logger = logging.getLogger(__name__)
 class Config:
     """Application configuration."""
     
-    # Model settings
-    MODEL_PATH: str = os.getenv("MODEL_PATH", "models/llama2-7b-q4.gguf")
+    # Model settings - will be auto-detected
+    MODEL_PATH: str = os.getenv("MODEL_PATH", "")
     GPU_LAYERS: int = int(os.getenv("GPU_LAYERS", "20"))
     MODEL_CONTEXT_SIZE: int = int(os.getenv("MODEL_CONTEXT_SIZE", "2048"))
     MODEL_BATCH_SIZE: int = int(os.getenv("MODEL_BATCH_SIZE", "512"))
     
     # API settings
     API_HOST: str = os.getenv("API_HOST", "0.0.0.0")
-    API_PORT: int = int(os.getenv("API_PORT", "8000"))
+    API_PORT: int = int(os.getenv("API_PORT", "8001"))
     DEBUG: bool = os.getenv("DEBUG", "false").lower() == "true"
     
     # Redis settings
@@ -254,8 +255,40 @@ class LLMManager:
     """Manages LLM initialization and operations."""
     
     @staticmethod
+    def find_available_model() -> str:
+        """Find the first available GGUF model."""
+        models_dir = Path("models")
+        if not models_dir.exists():
+            raise FileNotFoundError("Models directory not found. Please run setup_model.py first.")
+        
+        # Look for GGUF models in order of preference
+        model_candidates = [
+            "models/llama2-7b-q4.gguf",
+            "models/llama2-7b-chat.gguf", 
+            "models/tinyllama-1.1b-chat.gguf",
+            "models/tinyllama.gguf"
+        ]
+        
+        # Also search for any .gguf files in the models directory
+        for gguf_file in models_dir.rglob("*.gguf"):
+            model_candidates.append(str(gguf_file))
+        
+        for model_path in model_candidates:
+            if os.path.exists(model_path):
+                logger.info(f"Found model: {model_path}")
+                return model_path
+        
+        raise FileNotFoundError(
+            "No GGUF model found. Please run setup_model.py to download and convert a model."
+        )
+    
+    @staticmethod
     def initialize_model() -> Llama:
         """Initialize the LLM model."""
+        # Auto-detect model if not specified
+        if not config.MODEL_PATH:
+            config.MODEL_PATH = LLMManager.find_available_model()
+        
         if not os.path.exists(config.MODEL_PATH):
             raise FileNotFoundError(
                 f"Model not found at {config.MODEL_PATH}. "
