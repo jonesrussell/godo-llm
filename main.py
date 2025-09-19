@@ -19,7 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from llama_cpp import Llama
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 from sse_starlette.sse import EventSourceResponse
 
 # Configure logging
@@ -107,7 +107,8 @@ class GenerateRequest(BaseModel):
         description="Custom cache key"
     )
     
-    @validator('stop')
+    @field_validator('stop')
+    @classmethod
     def validate_stop_sequences(cls, v):
         if v is not None and len(v) > 10:
             raise ValueError("Maximum 10 stop sequences allowed")
