@@ -39,8 +39,7 @@ llm-godo/
 ├── main.py                 # 🚀 Core API application
 ├── test_api.py            # 🧪 Comprehensive testing suite
 ├── setup_model.py         # 📥 Model setup (with automatic fallbacks)
-├── setup_env.py           # 🔧 Environment configuration
-├── setup_environment.sh   # 🛠️ System dependencies setup
+├── setup_env.py           # 🔧 Environment & system setup
 ├── requirements.txt       # 📦 Python dependencies
 ├── env.example           # 📝 Environment template
 ├── docker/               # 🐳 Docker configuration
@@ -64,8 +63,10 @@ python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 
-# Set up environment variables
+# Set up environment and system dependencies
 python setup_env.py
+# Choose option 1 to install system dependencies
+# Choose option 2 to create .env file
 # Edit .env file with your Hugging Face token
 ```
 
