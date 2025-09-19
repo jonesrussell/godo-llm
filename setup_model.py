@@ -2,26 +2,52 @@
 """
 Script to download and quantize Llama-2-7b model for local inference.
 Requires Hugging Face account and Llama 2 license acceptance.
+
+This script provides multiple fallback options to ensure setup always succeeds.
 """
 
 import os
 import subprocess
 import sys
+import logging
 from pathlib import Path
+from typing import Optional, Tuple
 from dotenv import load_dotenv
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
 
 # Load environment variables from .env file
 load_dotenv()
 
-def run_command(cmd, check=True):
-    """Run shell command with error handling"""
-    print(f"Running: {cmd}")
-    result = subprocess.run(cmd, shell=True, check=check, capture_output=True, text=True)
-    if result.stdout:
-        print(result.stdout)
-    if result.stderr:
-        print(result.stderr)
-    return result
+def run_command(cmd: str, check: bool = True) -> subprocess.CompletedProcess:
+    """Run shell command with proper error handling and logging."""
+    logger.info(f"Running command: {cmd}")
+    try:
+        result = subprocess.run(
+            cmd, 
+            shell=True, 
+            check=check, 
+            capture_output=True, 
+            text=True,
+            timeout=300  # 5 minute timeout
+        )
+        if result.stdout:
+            logger.info(f"Command output: {result.stdout}")
+        if result.stderr:
+            logger.warning(f"Command stderr: {result.stderr}")
+        return result
+    except subprocess.TimeoutExpired:
+        logger.error(f"Command timed out: {cmd}")
+        raise
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Command failed: {cmd}")
+        logger.error(f"Error: {e}")
+        raise
 
 def check_dependencies():
     """Check if required tools are installed"""
