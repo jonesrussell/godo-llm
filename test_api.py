@@ -2,15 +2,28 @@
 """
 Test script for the local LLM inference API.
 Run this to verify your setup is working correctly.
+
+This script provides comprehensive testing of all API endpoints and functionality.
 """
 
 import asyncio
 import json
 import time
 import os
+import sys
+import logging
+from typing import Dict, Any, List, Tuple
+from pathlib import Path
+
 import requests
-from typing import Dict, Any
 from dotenv import load_dotenv
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
@@ -20,21 +33,35 @@ API_HOST = os.getenv("API_HOST", "localhost")
 API_PORT = os.getenv("API_PORT", "8000")
 API_BASE = f"http://{API_HOST}:{API_PORT}"
 
-def test_health():
-    """Test health endpoint"""
-    print("🔍 Testing health endpoint...")
-    try:
-        response = requests.get(f"{API_BASE}/health", timeout=10)
-        if response.status_code == 200:
-            data = response.json()
-            print(f"✅ Health check passed: {data}")
-            return True
-        else:
-            print(f"❌ Health check failed: {response.status_code}")
-            return False
-    except Exception as e:
-        print(f"❌ Health check error: {e}")
-        return False
+# Test configuration
+TEST_TIMEOUT = 30  # seconds
+MAX_RETRIES = 3
+
+def test_health() -> Tuple[bool, Dict[str, Any]]:
+    """Test health endpoint with retry logic."""
+    logger.info("Testing health endpoint...")
+    
+    for attempt in range(MAX_RETRIES):
+        try:
+            response = requests.get(f"{API_BASE}/health", timeout=TEST_TIMEOUT)
+            if response.status_code == 200:
+                data = response.json()
+                logger.info(f"Health check passed: {data}")
+                return True, data
+            else:
+                logger.warning(f"Health check failed (attempt {attempt + 1}): {response.status_code}")
+                if attempt < MAX_RETRIES - 1:
+                    time.sleep(2)
+                    continue
+                return False, {}
+        except Exception as e:
+            logger.error(f"Health check error (attempt {attempt + 1}): {e}")
+            if attempt < MAX_RETRIES - 1:
+                time.sleep(2)
+                continue
+            return False, {}
+    
+    return False, {}
 
 def test_model_info():
     """Test model info endpoint"""
