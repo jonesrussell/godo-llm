@@ -79,7 +79,7 @@ ENV LD_LIBRARY_PATH=/home/${APP_USER}/.local/lib/python3.11/site-packages/llama_
 COPY --chown=${APP_USER}:${APP_USER} main.py .
 COPY --chown=${APP_USER}:${APP_USER} test_api.py .
 COPY --chown=${APP_USER}:${APP_USER} setup_*.py .
-COPY --chown=${APP_USER}:${APP_USER} env.example .
+COPY --chown=${APP_USER}:${APP_USER} .env.example .
 COPY --chown=${APP_USER}:${APP_USER} frontend/ ./frontend/
 
 # Switch to non-root user
