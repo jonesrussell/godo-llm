@@ -1,0 +1,351 @@
+version: '3'
+
+# Global variables
+vars:
+  PYTHON: python3
+  PIP: pip
+  VENV_DIR: venv
+  MODELS_DIR: models
+  API_HOST: localhost
+  API_PORT: 8000
+  API_BASE: "http://{{.API_HOST}}:{{.API_PORT}}"
+tasks:
+  # =============================================================================
+  # HELP & INFO
+  # =============================================================================
+  help:
+    desc: "Show available tasks"
+    cmds:
+      - task --list
+
+  info:
+    desc: "Show project information and status"
+    cmds:
+      - echo "🚀 Local LLM Inference Pipeline"
+      - echo "================================"
+      - echo ""
+      - echo "📁 Project Structure:"
+      - echo "  main.py          - Core FastAPI application"
+      - echo "  test_api.py      - Comprehensive testing suite"
+      - echo "  setup_model.py   - Model download and setup"
+      - echo "  setup_env.py     - Environment configuration"
+      - echo ""
+      - echo "🐳 Docker Support:"
+      - echo "  docker/          - Docker configuration files"
+      - echo ""
+      - echo "🎯 Quick Commands:"
+      - echo "  task setup       - Complete environment setup"
+      - echo "  task start       - Start the API server"
+      - echo "  task test        - Run comprehensive tests"
+      - echo "  task docker:up   - Start with Docker Compose"
+
+  # =============================================================================
+  # ENVIRONMENT SETUP
+  # =============================================================================
+  setup:
+    desc: "Complete environment setup (dependencies + environment)"
+    deps: [setup:deps, setup:env]
+    cmds:
+      - echo "✅ Environment setup complete!"
+      - echo ""
+      - echo "Next steps:"
+      - echo "1. task model:download  - Download Llama-2-7b model"
+      - echo "2. task start           - Start the API server"
+      - echo "3. task test            - Run tests"
+
+  "setup:deps":
+    desc: "Install system dependencies"
+    cmds:
+      - echo "🔧 Installing system dependencies..."
+      - |
+        if command -v apt-get >/dev/null 2>&1; then
+          echo "📦 Installing Ubuntu/Debian dependencies..."
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake gcc-12 g++-12 git wget curl python3-dev python3-pip python3-venv redis-server
+        elif command -v yum >/dev/null 2>&1; then
+          echo "📦 Installing RHEL/CentOS dependencies..."
+          sudo yum groupinstall -y "Development Tools"
+          sudo yum install -y cmake git wget curl python3-devel python3-pip redis
+        else
+          echo "⚠️  Please install dependencies manually:"
+          echo "   - build-essential (gcc, g++, make)"
+          echo "   - cmake"
+          echo "   - python3-dev"
+          echo "   - redis-server"
+        fi
+
+  "setup:env":
+    desc: "Create virtual environment and install Python dependencies"
+    cmds:
+      - echo "🐍 Setting up Python environment..."
+      - "{{.PYTHON}} -m venv {{.VENV_DIR}}"
+      - echo "📦 Installing Python dependencies..."
+      - "{{.VENV_DIR}}/bin/{{.PIP}} install --upgrade pip"
+      - "{{.VENV_DIR}}/bin/{{.PIP}} install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118"
+      - "{{.VENV_DIR}}/bin/{{.PIP}} install -r requirements.txt"
+
+  "setup:validate":
+    desc: "Validate environment setup"
+    cmds:
+      - echo "🔍 Validating environment..."
+      - "{{.VENV_DIR}}/bin/{{.PYTHON}} -c 'import torch; print(f\"PyTorch: {torch.__version__}\"); print(f\"CUDA: {torch.cuda.is_available()}\")'"
+      - "{{.VENV_DIR}}/bin/{{.PYTHON}} -c 'import llama_cpp; print(f\"llama-cpp-python: {llama_cpp.__version__}\")'"
+      - echo "✅ Environment validation complete!"
+
+  # =============================================================================
+  # MODEL MANAGEMENT
+  # =============================================================================
+  "model:download":
+    desc: "Download and setup Llama-2-7b model"
+    cmds:
+      - echo "📥 Downloading Llama-2-7b model..."
+      - "{{.VENV_DIR}}/bin/{{.PYTHON}} setup_model.py"
+
+  "model:check":
+    desc: "Check for existing models"
+    cmds:
+      - echo "🔍 Checking for existing models..."
+      - |
+        if [ -f "{{.MODELS_DIR}}/llama2-7b-q4.gguf" ]; then
+          echo "✅ Found Q4_K_M quantized model"
+        elif [ -f "{{.MODELS_DIR}}/llama2-7b-chat.gguf" ]; then
+          echo "✅ Found GGUF model"
+        elif [ -d "{{.MODELS_DIR}}/llama2-7b" ]; then
+          echo "✅ Found HuggingFace model"
+        else
+          echo "❌ No models found - run 'task model:download'"
+        fi
+
+  "model:clean":
+    desc: "Clean model files"
+    cmds:
+      - echo "🧹 Cleaning model files..."
+      - rm -rf {{.MODELS_DIR}}/llama2-7b*
+      - rm -rf {{.MODELS_DIR}}/tinyllama*
+      - echo "✅ Model files cleaned"
+
+  # =============================================================================
+  # DEVELOPMENT
+  # =============================================================================
+  start:
+    desc: "Start the API server"
+    cmds:
+      - echo "🚀 Starting LLM API server..."
+      - "{{.VENV_DIR}}/bin/{{.PYTHON}} main.py"
+
+  "start:redis":
+    desc: "Start Redis server"
+    cmds:
+      - echo "🗄️  Starting Redis server..."
+      - redis-server --daemonize yes
+      - echo "✅ Redis server started"
+
+  "start:frontend":
+    desc: "Start frontend development server"
+    cmds:
+      - echo "🎨 Starting frontend server..."
+      - cd frontend && {{.PYTHON}} -m http.server 8080
+
+  dev:
+    desc: "Start development environment (Redis + API + Frontend)"
+    deps: [start:redis]
+    cmds:
+      - "echo 🔧 Starting development environment..."
+      - "echo Redis: http://localhost:6379"
+      - "echo API: http://localhost:8000" 
+      - "echo Frontend: http://localhost:8080"
+      - "echo"
+      - "echo Starting API server..."
+      - "{{.VENV_DIR}}/bin/{{.PYTHON}} main.py"
+
+  # =============================================================================
+  # TESTING
+  # =============================================================================
+  test:
+    desc: "Run comprehensive API tests"
+    cmds:
+      - echo "🧪 Running comprehensive tests..."
+      - "{{.VENV_DIR}}/bin/{{.PYTHON}} test_api.py"
+
+  "test:health":
+    desc: "Test health endpoint"
+    cmds:
+      - echo "🔍 Testing health endpoint..."
+      - curl -f {{.API_BASE}}/health || echo "❌ Health check failed"
+
+  "test:model":
+    desc: "Test model info endpoint"
+    cmds:
+      - echo "🔍 Testing model info..."
+      - curl -f {{.API_BASE}}/models/info || echo "❌ Model info failed"
+
+  "test:generate":
+    desc: "Test text generation"
+    cmds:
+      - echo "🔍 Testing text generation..."
+      - |
+        curl -X POST "{{.API_BASE}}/generate" \
+          -H "Content-Type: application/json" \
+          -d '{"prompt": "Hello, how are you?", "max_tokens": 20, "stream": false}' \
+          -w "Time: %{time_total}s\n" || echo "❌ Generation test failed"
+
+  "test:stream":
+    desc: "Test streaming generation"
+    cmds:
+      - echo "🔍 Testing streaming generation..."
+      - |
+        curl -X POST "{{.API_BASE}}/generate" \
+          -H "Content-Type: application/json" \
+          -d '{"prompt": "Tell me a story", "max_tokens": 50, "stream": true}' \
+          --no-buffer || echo "❌ Streaming test failed"
+
+  # =============================================================================
+  # MONITORING & DEBUGGING
+  # =============================================================================
+  logs:
+    desc: "Show API logs"
+    cmds:
+      - echo "📋 Showing API logs..."
+      - tail -f logs/api.log 2>/dev/null || echo "No log file found"
+
+  "monitor:gpu":
+    desc: "Monitor GPU usage"
+    cmds:
+      - echo "🖥️  Monitoring GPU usage..."
+      - watch -n 1 nvidia-smi
+
+  "monitor:redis":
+    desc: "Monitor Redis status"
+    cmds:
+      - echo "🗄️  Checking Redis status..."
+      - redis-cli ping || echo "❌ Redis not running"
+
+  "monitor:api":
+    desc: "Monitor API performance"
+    cmds:
+      - echo "📊 Monitoring API performance..."
+      - |
+        while true; do
+          echo "$(date): $(curl -s {{.API_BASE}}/health | jq -r '.status // "ERROR"')"
+          sleep 5
+        done
+
+  # =============================================================================
+  # DOCKER OPERATIONS
+  # =============================================================================
+  "docker:build":
+    desc: "Build Docker images"
+    cmds:
+      - echo "🐳 Building Docker images..."
+      - docker-compose -f docker/docker-compose.yml build
+
+  "docker:up":
+    desc: "Start services with Docker Compose"
+    cmds:
+      - echo "🐳 Starting Docker services..."
+      - docker-compose -f docker/docker-compose.yml up --build
+
+  "docker:up:dev":
+    desc: "Start development environment with Docker"
+    cmds:
+      - echo "🐳 Starting development environment..."
+      - docker-compose -f docker/docker-compose.yml -f docker/docker-compose.dev.yml up --build
+
+  "docker:up:prod":
+    desc: "Start production environment with Docker"
+    cmds:
+      - echo "🐳 Starting production environment..."
+      - docker-compose -f docker/docker-compose.yml -f docker/docker-compose.prod.yml up --build
+
+  "docker:down":
+    desc: "Stop Docker services"
+    cmds:
+      - echo "🐳 Stopping Docker services..."
+      - docker-compose -f docker/docker-compose.yml down
+
+  "docker:logs":
+    desc: "Show Docker service logs"
+    cmds:
+      - echo "📋 Showing Docker logs..."
+      - docker-compose -f docker/docker-compose.yml logs -f
+
+  "docker:clean":
+    desc: "Clean Docker resources"
+    cmds:
+      - echo "🧹 Cleaning Docker resources..."
+      - docker-compose -f docker/docker-compose.yml down -v
+      - docker system prune -f
+
+  # =============================================================================
+  # MAINTENANCE
+  # =============================================================================
+  clean:
+    desc: "Clean project files"
+    cmds:
+      - echo "🧹 Cleaning project files..."
+      - rm -rf __pycache__/
+      - rm -rf *.pyc
+      - rm -rf .pytest_cache/
+      - rm -rf logs/*.log
+      - echo "✅ Project cleaned"
+
+  "clean:all":
+    desc: "Clean all files including models and Docker"
+    deps: [model:clean, docker:clean]
+    cmds:
+      - echo "🧹 Deep cleaning project..."
+      - rm -rf {{.VENV_DIR}}/
+      - rm -rf logs/
+      - echo "✅ Deep clean complete"
+
+  update:
+    desc: "Update dependencies"
+    cmds:
+      - echo "⬆️  Updating dependencies..."
+      - "{{.VENV_DIR}}/bin/{{.PIP}} install --upgrade pip"
+      - "{{.VENV_DIR}}/bin/{{.PIP}} install -r requirements.txt --upgrade"
+
+  # =============================================================================
+  # QUICK ACTIONS
+  # =============================================================================
+  quickstart:
+    desc: "Quick start for new users"
+    cmds:
+      - echo "🚀 Quick Start Guide"
+      - echo "==================="
+      - echo ""
+      - echo "1. Setting up environment..."
+      - task setup
+      - echo ""
+      - echo "2. Downloading model..."
+      - task model:download
+      - echo ""
+      - echo "3. Starting Redis..."
+      - task start:redis
+      - echo ""
+      - echo "4. Testing setup..."
+      - task test
+      - echo ""
+      - echo "✅ Quick start complete!"
+      - echo "Run 'task start' to begin using the API"
+
+  status:
+    desc: "Check system status"
+    cmds:
+      - echo "📊 System Status"
+      - echo "==============="
+      - echo ""
+      - echo "🐍 Python Environment:"
+      - "{{.VENV_DIR}}/bin/{{.PYTHON}} --version"
+      - echo ""
+      - echo "🗄️  Redis Status:"
+      - redis-cli ping 2>/dev/null && echo "✅ Redis running" || echo "❌ Redis not running"
+      - echo ""
+      - echo "🖥️  GPU Status:"
+      - nvidia-smi --query-gpu=name,memory.used,memory.total --format=csv,noheader,nounits 2>/dev/null || echo "❌ GPU not available"
+      - echo ""
+      - echo "📁 Model Status:"
+      - task model:check
+      - echo ""
+      - echo "🌐 API Status:"
+      - curl -s {{.API_BASE}}/health 2>/dev/null | jq -r '.status // "Not running"' || echo "❌ API not running"

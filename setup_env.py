@@ -113,99 +113,35 @@ def show_env_help():
     print("  RELOAD - Enable auto-reload (default: false)")
 
 def install_system_dependencies() -> bool:
-    """Install system dependencies based on the operating system"""
-    system = platform.system().lower()
-    
-    if system == "linux":
-        return _install_linux_dependencies()
-    elif system == "darwin":  # macOS
-        return _install_macos_dependencies()
-    else:
-        print(f"⚠️  Unsupported operating system: {system}")
-        print("Please install dependencies manually:")
-        print("- build-essential (gcc, g++, make)")
-        print("- cmake")
-        print("- python3-dev")
-        print("- redis-server")
-        return False
-
-def _install_linux_dependencies() -> bool:
-    """Install dependencies on Linux systems"""
-    print("🐧 Installing Linux dependencies...")
-    
-    # Check if apt-get is available (Ubuntu/Debian)
-    if subprocess.run(["which", "apt-get"], capture_output=True).returncode == 0:
-        return _install_apt_dependencies()
-    # Check if yum is available (RHEL/CentOS)
-    elif subprocess.run(["which", "yum"], capture_output=True).returncode == 0:
-        return _install_yum_dependencies()
-    else:
-        print("❌ Package manager not found. Please install dependencies manually.")
-        return False
-
-def _install_apt_dependencies() -> bool:
-    """Install dependencies using apt-get"""
-    packages = [
-        "build-essential", "cmake", "gcc-12", "g++-12", "git", "wget", "curl",
-        "python3-dev", "python3-pip", "python3-venv", "redis-server"
-    ]
-    
+    """Install system dependencies using Task"""
+    print("🔧 Installing system dependencies using Task...")
     try:
-        print("📦 Updating package list...")
-        subprocess.run(["sudo", "apt-get", "update"], check=True)
-        
-        print("📦 Installing packages...")
-        subprocess.run(["sudo", "apt-get", "install", "-y"] + packages, check=True)
-        
-        print("✅ Linux dependencies installed successfully!")
+        result = subprocess.run(["task", "setup:deps"], check=True, capture_output=True, text=True)
+        print(result.stdout)
         return True
     except subprocess.CalledProcessError as e:
         print(f"❌ Failed to install dependencies: {e}")
+        print("Please run: task setup:deps")
         return False
-
-def _install_yum_dependencies() -> bool:
-    """Install dependencies using yum"""
-    packages = [
-        "cmake", "git", "wget", "curl", "python3-devel", "python3-pip", "redis"
-    ]
-    
-    try:
-        print("📦 Installing development tools...")
-        subprocess.run(["sudo", "yum", "groupinstall", "-y", "Development Tools"], check=True)
-        
-        print("📦 Installing packages...")
-        subprocess.run(["sudo", "yum", "install", "-y"] + packages, check=True)
-        
-        print("✅ Linux dependencies installed successfully!")
-        return True
-    except subprocess.CalledProcessError as e:
-        print(f"❌ Failed to install dependencies: {e}")
+    except FileNotFoundError:
+        print("❌ Task not found. Please install Task first:")
+        print("https://taskfile.dev/installation/")
         return False
-
-def _install_macos_dependencies() -> bool:
-    """Install dependencies on macOS"""
-    print("🍎 macOS detected. Please install dependencies manually:")
-    print("1. Install Homebrew: /bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\"")
-    print("2. Install packages: brew install cmake gcc redis")
-    return False
 
 def validate_environment() -> bool:
-    """Validate that required tools are available"""
-    print("🔍 Validating environment...")
-    
-    required_commands = ["python3", "pip", "cmake", "gcc-12", "g++-12"]
-    missing_commands = []
-    
-    for cmd in required_commands:
-        if subprocess.run(["which", cmd], capture_output=True).returncode != 0:
-            missing_commands.append(cmd)
-    
-    if missing_commands:
-        print(f"❌ Missing required commands: {', '.join(missing_commands)}")
+    """Validate environment using Task"""
+    print("🔍 Validating environment using Task...")
+    try:
+        result = subprocess.run(["task", "setup:validate"], check=True, capture_output=True, text=True)
+        print(result.stdout)
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Environment validation failed: {e}")
         return False
-    
-    print("✅ All required commands are available!")
-    return True
+    except FileNotFoundError:
+        print("❌ Task not found. Please install Task first:")
+        print("https://taskfile.dev/installation/")
+        return False
 
 def main():
     """Main setup function"""
@@ -215,9 +151,9 @@ def main():
     
     while True:
         print("Choose an option:")
-        print("1. Install system dependencies")
+        print("1. Install system dependencies (using Task)")
         print("2. Create .env file with default values")
-        print("3. Validate environment")
+        print("3. Validate environment (using Task)")
         print("4. Show environment variables help")
         print("5. Exit")
         print("")

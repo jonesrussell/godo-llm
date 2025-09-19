@@ -49,6 +49,28 @@ def run_command(cmd: str, check: bool = True) -> subprocess.CompletedProcess:
         logger.error(f"Error: {e}")
         raise
 
+def run_task_command(task_name: str) -> bool:
+    """Run a Task command with error handling."""
+    try:
+        logger.info(f"Running Task command: {task_name}")
+        result = subprocess.run(
+            ["task", task_name],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=600  # 10 minute timeout for model operations
+        )
+        logger.info(f"Task output: {result.stdout}")
+        return True
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Task command failed: {task_name}")
+        logger.error(f"Error: {e}")
+        return False
+    except FileNotFoundError:
+        logger.error("Task not found. Please install Task first:")
+        logger.error("https://taskfile.dev/installation/")
+        return False
+
 def check_dependencies():
     """Check if required tools are installed"""
     print("Checking dependencies...")

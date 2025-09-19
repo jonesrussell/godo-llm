@@ -36,98 +36,133 @@ A complete local inference solution for Llama-2-7b on RTX 4060 with 8GB VRAM. Fe
 
 ```
 llm-godo/
-├── main.py                 # 🚀 Core API application
-├── test_api.py            # 🧪 Comprehensive testing suite
-├── setup_model.py         # 📥 Model setup (with automatic fallbacks)
-├── setup_env.py           # 🔧 Environment & system setup
-├── requirements.txt       # 📦 Python dependencies
-├── env.example           # 📝 Environment template
-├── docker/               # 🐳 Docker configuration
-│   ├── Dockerfile        # Container setup
+├── Taskfile.yml          # 🎯 Task automation (recommended)
+├── main.py               # 🚀 Core API application
+├── test_api.py          # 🧪 Comprehensive testing suite
+├── setup_model.py       # 📥 Model setup (with automatic fallbacks)
+├── setup_env.py         # 🔧 Environment & system setup
+├── requirements.txt     # 📦 Python dependencies
+├── env.example         # 📝 Environment template
+├── docker/             # 🐳 Docker configuration
+│   ├── Dockerfile      # Container setup
 │   ├── docker-compose.yml # Multi-service setup
 │   ├── docker-compose.dev.yml # Development overrides
 │   └── docker-compose.prod.yml # Production overrides
-├── README.md             # 📖 Documentation
-└── frontend/             # 🎨 Web interface
+├── README.md           # 📖 Documentation
+└── frontend/           # 🎨 Web interface
     └── index.html
 ```
 
 ## 🛠️ Quick Start
 
-### 1. Clone and Setup
+### Option 1: Using Task (Recommended)
 
 ```bash
+# Clone repository
 git clone https://github.com/jonesrussell/godo-llm.git
 cd llm-godo
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+
+# Install Task (if not already installed)
+# See: https://taskfile.dev/installation/
+
+# Complete setup with one command
+task quickstart
+```
+
+**What `task quickstart` does:**
+- ✅ Installs system dependencies (build tools, CUDA, Redis)
+- ✅ Creates Python virtual environment
+- ✅ Installs Python dependencies with CUDA support
+- ✅ Downloads Llama-2-7b model with automatic fallbacks
+- ✅ Starts Redis server
+- ✅ Runs comprehensive tests
+- ✅ Ready to use!
+
+### Option 2: Manual Setup
+
+```bash
+# Clone repository
+git clone https://github.com/jonesrussell/godo-llm.git
+cd llm-godo
 
 # Set up environment and system dependencies
 python setup_env.py
 # Choose option 1 to install system dependencies
 # Choose option 2 to create .env file
 # Edit .env file with your Hugging Face token
-```
 
-### 2. Download and Quantize Model
-
-```bash
-# Automated setup with automatic fallbacks
+# Download and setup model
 python setup_model.py
+
+# Start Redis
+task start:redis
+
+# Start the API
+task start
 ```
 
-**What this does:**
-- ✅ Downloads Llama-2-7b (requires Hugging Face token)
-- ✅ Falls back to pre-converted GGUF model if main download fails
-- ✅ Falls back to TinyLlama test model if all else fails
-- ✅ Handles quantization and conversion automatically
-
-**Manual Setup** (if automated script fails):
-```bash
-# 1. Login to Hugging Face
-huggingface-cli login
-
-# 2. Accept Llama 2 license
-# Visit: https://huggingface.co/meta-llama/Llama-2-7b-chat-hf
-
-# 3. Download model
-python -c "
-from huggingface_hub import snapshot_download
-snapshot_download('meta-llama/Llama-2-7b-chat-hf', cache_dir='./models/llama2-7b')
-"
-```
-
-### 3. Start the API
-
-```bash
-# Activate environment
-source venv/bin/activate
-
-# Start the API server
-python main.py
-```
-
-The API will be available at: `http://localhost:8000`
-
-### 4. Test the System
+### 3. Test the System
 
 ```bash
 # Run comprehensive tests
-python test_api.py
+task test
 
-# Or test manually
-curl http://localhost:8000/health
+# Or test individual components
+task test:health
+task test:model
+task test:generate
 ```
 
-### 5. Use Web Interface
+### 4. Use Web Interface
 
-Open `frontend/index.html` in your browser or serve it:
 ```bash
-cd frontend
-python -m http.server 8080
+# Start frontend server
+task start:frontend
 # Visit: http://localhost:8080
 ```
+
+## 🎯 Task Commands Reference
+
+### Setup & Environment
+- `task setup` - Complete environment setup
+- `task setup:deps` - Install system dependencies
+- `task setup:env` - Create virtual environment
+- `task setup:validate` - Validate environment
+
+### Model Management
+- `task model:download` - Download Llama-2-7b model
+- `task model:check` - Check for existing models
+- `task model:clean` - Clean model files
+
+### Development
+- `task start` - Start API server
+- `task start:redis` - Start Redis server
+- `task start:frontend` - Start frontend server
+- `task dev` - Start full development environment
+
+### Testing
+- `task test` - Run comprehensive tests
+- `task test:health` - Test health endpoint
+- `task test:model` - Test model info
+- `task test:generate` - Test text generation
+- `task test:stream` - Test streaming generation
+
+### Docker
+- `task docker:up` - Start with Docker Compose
+- `task docker:up:dev` - Start development environment
+- `task docker:up:prod` - Start production environment
+- `task docker:down` - Stop Docker services
+
+### Monitoring
+- `task monitor:gpu` - Monitor GPU usage
+- `task monitor:redis` - Monitor Redis status
+- `task monitor:api` - Monitor API performance
+- `task status` - Check system status
+
+### Maintenance
+- `task clean` - Clean project files
+- `task update` - Update dependencies
+- `task help` - Show all available tasks
 
 ## 📊 Performance Results
 
