@@ -43,8 +43,11 @@ llm-godo/
 ├── setup_environment.sh   # 🛠️ System dependencies setup
 ├── requirements.txt       # 📦 Python dependencies
 ├── env.example           # 📝 Environment template
-├── Dockerfile            # 🐳 Container setup
-├── docker-compose.yml    # 🐳 Multi-service setup
+├── docker/               # 🐳 Docker configuration
+│   ├── Dockerfile        # Container setup
+│   ├── docker-compose.yml # Multi-service setup
+│   ├── docker-compose.dev.yml # Development overrides
+│   └── docker-compose.prod.yml # Production overrides
 ├── README.md             # 📖 Documentation
 └── frontend/             # 🎨 Web interface
     └── index.html
@@ -215,7 +218,7 @@ TOP_K_DEFAULT=40
 
 ```bash
 # Build and run with Docker Compose
-docker-compose up --build
+docker-compose -f docker/docker-compose.yml up --build
 
 # Or build manually
 docker build -t llm-inference .
@@ -226,13 +229,13 @@ docker run --gpus all -p 8000:8000 -v $(pwd)/models:/app/models llm-inference
 
 ```bash
 # Build and start all services
-docker-compose up --build
+docker-compose -f docker/docker-compose.yml up --build
 
 # Run in background
-docker-compose up -d
+docker-compose -f docker/docker-compose.yml up -d
 
 # View logs
-docker-compose logs -f llm-api
+docker-compose -f docker/docker-compose.yml logs -f llm-api
 ```
 
 ### Manual Docker Build

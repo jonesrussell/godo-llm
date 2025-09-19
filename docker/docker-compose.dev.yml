@@ -9,10 +9,10 @@ services:
       - RELOAD=true
     volumes:
       # Override read-only volume mounts for development
-      - ./models:/app/models:rw
-      - ./frontend:/app/frontend:rw
-      - .:/app/src:ro  # Mount source code as read-only for hot reload
-      - ./logs:/app/logs:rw
+      - ../models:/app/models:rw
+      - ../frontend:/app/frontend:rw
+      - ..:/app/src:ro  # Mount source code as read-only for hot reload
+      - ../logs:/app/logs:rw
     ports:
       - "8000:8000"
       - "5678:5678"  # Debugger port
@@ -33,6 +33,6 @@ services:
     ports:
       - "6379:6379"  # Expose Redis port for external tools
     volumes:
-      - redis_data:/data
+      - ../redis_data:/data
       # No config override in dev for simplicity
     command: redis-server --appendonly yes --loglevel debug

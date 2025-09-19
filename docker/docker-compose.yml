@@ -27,14 +27,14 @@ services:
 
   llm-api:
     build: 
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: docker/Dockerfile
       target: production
     container_name: llm-api
     ports:
       - "${API_PORT:-8000}:8000"
     env_file:
-      - .env
+      - ../.env
     environment:
       # Override .env for container networking
       - REDIS_URL=redis://redis:6379/${REDIS_DB:-0}

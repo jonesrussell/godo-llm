@@ -7,36 +7,36 @@
 ### Development
 ```bash
 # Start with development overrides
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+docker compose -f docker/docker-compose.yml -f docker/docker-compose.dev.yml up --build
 
 # Run in background
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+docker compose -f docker/docker-compose.yml -f docker/docker-compose.dev.yml up -d --build
 ```
 
 ### Production
 ```bash
 # Start with production overrides
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build
+docker compose -f docker/docker-compose.yml -f docker/docker-compose.prod.yml up --build
 
 # Run in background
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+docker compose -f docker/docker-compose.yml -f docker/docker-compose.prod.yml up -d --build
 ```
 
 ## Configuration Files
 
-### Base Configuration (`docker-compose.yml`)
+### Base Configuration (`docker/docker-compose.yml`)
 - Multi-service setup with Redis and LLM API
 - GPU support with NVIDIA runtime
 - Health checks and logging
 - Resource limits and reservations
 
-### Development Overrides (`docker-compose.dev.yml`)
+### Development Overrides (`docker/docker-compose.dev.yml`)
 - Debug mode enabled
 - Hot reload for development
 - Source code mounting
 - Verbose logging
 
-### Production Overrides (`docker-compose.prod.yml`)
+### Production Overrides (`docker/docker-compose.prod.yml`)
 - Production-optimized settings
 - Resource limits for performance
 - Enhanced logging configuration
@@ -77,10 +77,10 @@ ls -la models/llama2-7b-q4.gguf
 ### Start Services
 ```bash
 # Development
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+docker compose -f docker/docker-compose.yml -f docker/docker-compose.dev.yml up
 
 # Production
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up
+docker compose -f docker/docker-compose.yml -f docker/docker-compose.prod.yml up
 ```
 
 ### Stop Services
@@ -175,7 +175,7 @@ docker compose exec llm-api ping redis
 # Check memory usage
 docker stats
 
-# Adjust memory limits in docker-compose.prod.yml
+# Adjust memory limits in docker/docker-compose.prod.yml
 ```
 
 **Build Issues (llama-cpp-python compilation):**
@@ -194,7 +194,7 @@ docker compose exec llm-api env | grep -E "(CC|CXX)"
 ### Performance Optimization
 
 **Resource Limits:**
-- Adjust memory limits in `docker-compose.prod.yml`
+- Adjust memory limits in `docker/docker-compose.prod.yml`
 - Configure CPU limits for optimal performance
 - Monitor GPU memory usage
 
