@@ -1,206 +1,64 @@
 ---
 globs: *.py
-description: Python coding standards and conventions for LLM inference pipeline
+description: Python coding standards and best practices for the LLM inference pipeline
 ---
 
 # Python Coding Standards
 
-## Code Style and Formatting
+## Code Style & Formatting
 
-### Imports Organization
-- Group imports in this order: standard library, third-party, local imports
-- Use absolute imports when possible
-- Separate groups with blank lines
-- Sort imports alphabetically within groups
+- **Formatter**: Use `black` with default settings
+- **Linter**: Use `ruff` for fast linting
+- **Type Checking**: Use `mypy` for static type analysis
+- **Line Length**: 88 characters (black default)
+- **Import Sorting**: Use `ruff` import sorting
 
-```python
-import os
-import json
-import asyncio
-from typing import Optional, Dict, Any
-from contextlib import asynccontextmanager
+## Async/Await Patterns
 
-import redis
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import StreamingResponse
-from llama_cpp import Llama
-from pydantic import BaseModel
-
-from dotenv import load_dotenv
-```
-
-### Type Hints
-- Always use type hints for function parameters and return values
-- Use `Optional[T]` for nullable types
-- Use `Dict[str, Any]` for flexible dictionaries
-- Import from `typing` module for complex types
+This project heavily uses async/await for FastAPI and Redis operations:
 
 ```python
-async def generate_text(
-    prompt: str,
-    max_tokens: Optional[int] = 256,
-    temperature: Optional[float] = 0.7
-) -> GenerateResponse:
-    """Generate text with specified parameters."""
-```
-
-### Error Handling
-- Use specific exception types when possible
-- Include meaningful error messages
-- Handle Redis connection gracefully with fallbacks
-- Use try-except blocks for optional services
-
-```python
-try:
-    redis_client = redis.Redis(host=redis_host, port=redis_port, db=redis_db)
-    redis_client.ping()
-    REDIS_AVAILABLE = True
-except Exception as e:
-    print(f"⚠️  Redis not available: {e}")
-    REDIS_AVAILABLE = False
-```
-
-## Environment Configuration
-
-### Environment Variables
-- Always use `os.getenv()` with default values
-- Validate environment variables at startup
-- Use descriptive variable names with prefixes
-- Document all environment variables in [env.example](mdc:env.example)
-
-```python
-# Model Configuration
-model_path = os.getenv("MODEL_PATH", "models/llama2-7b-q4.gguf")
-n_gpu_layers = int(os.getenv("GPU_LAYERS", "20"))
-n_ctx = int(os.getenv("MODEL_CONTEXT_SIZE", "2048"))
-
-# API Configuration
-host = os.getenv("API_HOST", "0.0.0.0")
-port = int(os.getenv("API_PORT", "8000"))
-```
-
-### Configuration Validation
-- Validate file paths exist before using them
-- Check GPU memory availability
-- Provide clear error messages for missing dependencies
-
-```python
-if not os.path.exists(model_path):
-    raise FileNotFoundError(f"Model not found at {model_path}. Please run setup_model.py first.")
-```
-
-## Async Programming
-
-### Async Functions
-- Use `async def` for functions that perform I/O operations
-- Use `await` for async operations
-- Handle async context managers properly
-
-```python
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Initialize and cleanup resources"""
-    # Setup code
-    yield
-    # Cleanup code
-```
-
-### Streaming Responses
-- Use `EventSourceResponse` for Server-Sent Events
-- Implement proper error handling in streaming functions
-- Include small delays to prevent overwhelming clients
-
-```python
-async def stream_generation(request: GenerateRequest, cache_key: str):
-    """Stream generation with Server-Sent Events"""
-    try:
-        for token in llm(...):
-            yield {"event": "token", "data": json.dumps(...)}
-            await asyncio.sleep(0.01)
-    except Exception as e:
-        yield {"event": "error", "data": json.dumps({"error": str(e)})}
-```
-
-## Performance Optimization
-
-### Caching Strategy
-- Implement Redis caching for non-streaming responses
-- Use consistent cache key generation
-- Set appropriate cache expiration times
-- Handle cache failures gracefully
-
-```python
-def get_cache_key(prompt: str, params: Dict[str, Any]) -> str:
-    """Generate cache key from prompt and parameters"""
-    cache_data = {
-        "prompt": prompt,
-        "temperature": params.get("temperature", 0.7),
-        "top_p": params.get("top_p", 0.9)
-    }
-    return f"llm_cache:{hash(json.dumps(cache_data, sort_keys=True))}"
-```
-
-### Memory Management
-- Clean up global resources in lifespan context manager
-- Monitor GPU memory usage
-- Implement proper model cleanup
-
-```python
-# Cleanup
-if llm:
-    del llm
-```
-
-## Documentation and Comments
-
-### Docstrings
-- Use Google-style docstrings for functions and classes
-- Include parameter descriptions and return types
-- Document exceptions that may be raised
-
-```python
-async def generate(request: GenerateRequest):
-    """Generate text with optional caching
+# Preferred async patterns
+async def generate_text(prompt: str) -> AsyncGenerator[str, None]:
+    async with redis_client:
+        # Redis operations
+        cached_result = await redis_client.get(cache_key)
     
-    Args:
-        request: Generation parameters including prompt and settings
-        
-    Returns:
-        GenerateResponse: Generated text with metadata
-        
-    Raises:
-        HTTPException: If model is not loaded or generation fails
-    """
+    # LLM inference with streaming
+    async for token in model.generate(prompt):
+        yield token
 ```
 
-### Inline Comments
-- Explain complex logic and business rules
-- Document performance considerations
-- Include TODO comments for future improvements
+## Error Handling
 
-```python
-# Configure GPU layers (adjust based on your VRAM)
-n_gpu_layers = int(os.getenv("GPU_LAYERS", "20"))
+- Use FastAPI's `HTTPException` for API errors
+- Implement graceful fallbacks for model loading
+- Log errors with structured logging
+- Use context managers for resource cleanup
 
-# Small delay to prevent overwhelming the client
-await asyncio.sleep(0.01)
-```
+## Configuration Management
 
-## Testing Standards
+- Use Pydantic models for configuration validation
+- Environment variables via `.env` files
+- Type hints for all configuration classes
 
-### Test Structure
-- Use descriptive test function names
-- Test both success and failure scenarios
-- Include performance benchmarks
-- Test streaming and non-streaming modes
+## Performance Considerations
 
-```python
-async def test_generate_streaming():
-    """Test streaming text generation"""
-    response = await client.post("/generate", json={
-        "prompt": "Test prompt",
-        "stream": True
-    })
-    assert response.status_code == 200
-    assert response.headers["content-type"] == "text/event-stream"
-```
+- Use async Redis operations (`redis.asyncio`)
+- Implement caching for repeated requests
+- Stream responses for better UX
+- Monitor GPU memory usage
+
+## Testing Patterns
+
+- Use `pytest` with `pytest-asyncio`
+- Test both sync and async functions
+- Mock external dependencies (Redis, model loading)
+- Include integration tests for full API flow
+
+## Dependencies
+
+- Pin major versions in [requirements.txt](mdc:requirements.txt)
+- Use version ranges for minor updates
+- Separate dev dependencies from production
+- Include CUDA-specific packages for GPU support

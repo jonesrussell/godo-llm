@@ -1,0 +1,91 @@
+---
+globs: *.py
+description: FastAPI development patterns and conventions for the LLM inference API
+---
+
+# FastAPI Development Patterns
+
+## API Structure
+
+The main API is in [main.py](mdc:main.py) with these key patterns:
+
+### Endpoint Design
+
+```python
+@app.post("/generate", response_class=EventSourceResponse)
+async def generate_text(request: GenerateRequest):
+    # Streaming endpoint with Server-Sent Events
+    return EventSourceResponse(generate_stream(request))
+```
+
+### Request/Response Models
+
+- Use Pydantic models for request validation
+- Implement field validators for parameter constraints
+- Use `BaseModel` with proper type hints
+- Include example values in model documentation
+
+### Streaming Responses
+
+- Use `EventSourceResponse` for real-time token streaming
+- Implement `AsyncGenerator` for token-by-token generation
+- Handle client disconnections gracefully
+- Include proper SSE formatting
+
+### Error Handling
+
+```python
+try:
+    # LLM operation
+    result = await model.generate(prompt)
+except Exception as e:
+    logger.error(f"Generation failed: {e}")
+    raise HTTPException(
+        status_code=500,
+        detail="Text generation failed"
+    )
+```
+
+### CORS Configuration
+
+- Enable CORS for frontend integration
+- Configure allowed origins for development/production
+- Include credentials support for authenticated requests
+
+### Middleware Stack
+
+- CORS middleware for cross-origin requests
+- Request logging middleware
+- Error handling middleware
+- Static file serving for frontend
+
+### Health Checks
+
+- Implement `/health` endpoint for service monitoring
+- Include model loading status
+- Check Redis connectivity
+- Monitor GPU memory usage
+
+### Configuration Management
+
+- Use Pydantic `BaseSettings` for environment variables
+- Validate configuration on startup
+- Provide sensible defaults
+- Support both development and production configs
+
+### Async Context Management
+
+```python
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Load model, connect to Redis
+    yield
+    # Shutdown: Cleanup resources
+```
+
+### Testing Patterns
+
+- Use `httpx.AsyncClient` for async testing
+- Test streaming endpoints with proper SSE parsing
+- Mock external dependencies (Redis, model)
+- Include integration tests for full request flow

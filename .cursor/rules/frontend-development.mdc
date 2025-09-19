@@ -1,0 +1,77 @@
+---
+globs: frontend/*,*.html,*.js,*.vue
+description: Frontend development guidelines for the Vue.js web interface
+---
+
+# Frontend Development Guidelines
+
+## Vue.js Application Structure
+
+The frontend is a single-page Vue.js application in [frontend/index.html](mdc:frontend/index.html):
+
+### Component Architecture
+
+- Single-file Vue component with embedded HTML, CSS, and JavaScript
+- Reactive data binding for real-time updates
+- Event-driven communication with the API
+- Responsive design for different screen sizes
+
+### API Integration
+
+```javascript
+// Server-Sent Events for streaming
+const eventSource = new EventSource('/generate', {
+    method: 'POST',
+    body: JSON.stringify(requestData)
+});
+
+eventSource.onmessage = function(event) {
+    const data = JSON.parse(event.data);
+    // Update UI with streaming tokens
+};
+```
+
+### User Interface Patterns
+
+- **Real-time Streaming**: Display tokens as they arrive
+- **Parameter Controls**: Temperature, max tokens, top-p sliders
+- **History Management**: Save and load previous conversations
+- **Error Handling**: User-friendly error messages
+- **Loading States**: Visual feedback during generation
+
+### Styling Guidelines
+
+- Modern, clean design with good UX
+- Responsive layout for mobile and desktop
+- Consistent color scheme and typography
+- Smooth animations and transitions
+- Accessibility considerations
+
+### State Management
+
+- Vue reactive data for component state
+- Local storage for conversation history
+- URL parameters for sharing configurations
+- Session management for user preferences
+
+### Performance Optimization
+
+- Debounced input handling
+- Efficient DOM updates
+- Minimal re-renders
+- Lazy loading for large conversations
+- Memory cleanup for event listeners
+
+### Development Workflow
+
+- Hot reloading during development
+- Browser developer tools integration
+- Cross-browser compatibility testing
+- Mobile responsiveness testing
+
+### Deployment Integration
+
+- Static file serving via FastAPI
+- CDN-ready asset optimization
+- Environment-specific configuration
+- Production build optimization

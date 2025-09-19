@@ -1,446 +1,81 @@
 ---
 globs: test_*.py,*_test.py
-description: Testing guidelines and best practices for LLM inference pipeline
+description: Testing guidelines and patterns for the LLM inference pipeline
 ---
 
 # Testing Guidelines
 
-**✅ FULLY TESTED AND VERIFIED** - All 6/6 tests passing with verified performance metrics
+## Test Structure
 
-## Test Structure and Organization
+The main test suite is in [test_api.py](mdc:test_api.py) with comprehensive coverage:
 
-### Test File Naming - VERIFIED WORKING
-Follow consistent naming conventions (tested and working):
-- `test_api.py` - Main API endpoint tests ✅ **6/6 tests passing**
-- `test_model.py` - Model loading and inference tests
-- `test_streaming.py` - Streaming functionality tests
-- `test_integration.py` - End-to-end integration tests
+### Test Categories
 
-**Current Test Suite Status:**
-- ✅ Health Check: Working
-- ✅ Model Info: Working  
-- ✅ Non-streaming Generation: Working (5.4 tokens/sec)
-- ✅ Streaming Generation: Working
-- ✅ Caching: Working (209x speed improvement)
-- ✅ Error Handling: Working
+1. **Health Checks**: Service availability and status
+2. **Model Tests**: LLM loading and basic inference
+3. **API Tests**: Endpoint functionality and validation
+4. **Streaming Tests**: Server-Sent Events implementation
+5. **Caching Tests**: Redis integration and performance
+6. **Error Handling**: Graceful failure scenarios
 
-### Verified Test Results
-**Actual Test Output (6/6 tests passing):**
-```
-🧪 Local LLM Inference API Test Suite
-==================================================
-🔍 Testing health endpoint...
-✅ Health check passed: {'status': 'healthy', 'model_loaded': True, 'redis_connected': True}
-
-🔍 Testing model info...
-✅ Model info: {'model_path': 'models/llama2-7b-q4.gguf', 'context_size': 2048, 'gpu_layers': 20, 'batch_size': 512}
-
-🔍 Testing non-streaming generation...
-✅ Non-streaming generation successful!
-📊 Tokens: 33, ⏱️ Time: 7.40s, 🚀 Speed: 4.5 tokens/s
-
-🔍 Testing streaming generation...
-✅ Streaming generation started and completed!
-
-🔍 Testing caching...
-✅ Caching test passed!
-📊 First request: 1.67s, Second request: 0.01s, 🚀 Speed improvement: 209.9x faster
-
-🔍 Testing error handling...
-✅ Error handling works correctly
-
-📊 Test Results: 6/6 tests passed
-🎉 All tests passed! Your setup is working correctly.
-```
-
-### Test Organization
-Structure tests by functionality and complexity:
+### Async Testing Patterns
 
 ```python
 import pytest
-import asyncio
-from fastapi.testclient import TestClient
-from main import app
+import httpx
 
-class TestHealthEndpoints:
-    """Test health check and status endpoints"""
-    
-    def test_root_endpoint(self):
-        """Test root endpoint returns service info"""
-        pass
-    
-    def test_health_check(self):
-        """Test health endpoint returns correct status"""
-        pass
-
-class TestGenerationEndpoints:
-    """Test text generation endpoints"""
-    
-    def test_generate_non_streaming(self):
-        """Test non-streaming text generation"""
-        pass
-    
-    def test_generate_streaming(self):
-        """Test streaming text generation"""
-        pass
-
-class TestModelEndpoints:
-    """Test model information endpoints"""
-    
-    def test_model_info(self):
-        """Test model info endpoint"""
-        pass
-```
-
-## API Testing
-
-### FastAPI Test Client
-Use FastAPI's TestClient for API testing:
-
-```python
-from fastapi.testclient import TestClient
-
-client = TestClient(app)
-
-def test_generate_non_streaming():
-    """Test non-streaming text generation"""
-    response = client.post("/generate", json={
-        "prompt": "Hello, world!",
-        "max_tokens": 50,
-        "stream": False
-    })
-    
-    assert response.status_code == 200
-    data = response.json()
-    assert "text" in data
-    assert "tokens_generated" in data
-    assert "generation_time" in data
-    assert len(data["text"]) > 0
-```
-
-### Streaming Tests
-Test Server-Sent Events functionality:
-
-```python
-def test_generate_streaming():
-    """Test streaming text generation"""
-    response = client.post("/generate", json={
-        "prompt": "Tell me a story",
-        "max_tokens": 100,
-        "stream": True
-    })
-    
-    assert response.status_code == 200
-    assert response.headers["content-type"] == "text/event-stream"
-    
-    # Parse SSE events
-    events = []
-    for line in response.text.split('\n'):
-        if line.startswith('data: '):
-            events.append(json.loads(line[6:]))
-    
-    assert len(events) > 0
-    assert any(event.get("event") == "token" for event in events)
-    assert any(event.get("event") == "complete" for event in events)
-```
-
-### Error Handling Tests
-Test error scenarios and edge cases:
-
-```python
-def test_generate_invalid_request():
-    """Test generation with invalid request"""
-    response = client.post("/generate", json={
-        "prompt": "",  # Empty prompt
-        "max_tokens": -1  # Invalid token count
-    })
-    
-    assert response.status_code == 422  # Validation error
-
-def test_generate_model_not_loaded():
-    """Test generation when model is not loaded"""
-    # Mock model not loaded scenario
-    with patch('main.llm', None):
-        response = client.post("/generate", json={
-            "prompt": "Test prompt",
-            "stream": False
-        })
-        
-        assert response.status_code == 503
-        assert "Model not loaded" in response.json()["detail"]
-```
-
-## Model Testing
-
-### Model Loading Tests
-Test model initialization and configuration:
-
-```python
-def test_model_loading():
-    """Test model loads correctly with configuration"""
-    from main import lifespan
-    
-    # Test model loading
-    with lifespan(app):
-        assert llm is not None
-        assert llm.model_path == os.getenv("MODEL_PATH")
-        assert llm.n_gpu_layers() == int(os.getenv("GPU_LAYERS", "20"))
-```
-
-### Inference Tests
-Test model inference functionality:
-
-```python
-def test_model_inference():
-    """Test model generates text correctly"""
-    prompt = "The capital of France is"
-    
-    result = llm(
-        prompt=prompt,
-        max_tokens=10,
-        temperature=0.7,
-        stream=False
-    )
-    
-    assert "choices" in result
-    assert len(result["choices"]) > 0
-    assert "text" in result["choices"][0]
-    assert len(result["choices"][0]["text"]) > 0
-```
-
-## Performance Testing
-
-### Load Testing
-Test API performance under load:
-
-```python
-import time
-import concurrent.futures
-
-def test_concurrent_requests():
-    """Test API handles concurrent requests"""
-    def make_request():
-        response = client.post("/generate", json={
-            "prompt": "Test prompt",
-            "max_tokens": 50,
-            "stream": False
-        })
-        return response.status_code == 200
-    
-    # Test with 10 concurrent requests
-    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-        futures = [executor.submit(make_request) for _ in range(10)]
-        results = [future.result() for future in futures]
-    
-    assert all(results)
-```
-
-### Response Time Testing
-Test response time requirements:
-
-```python
-def test_response_time():
-    """Test API response time is acceptable"""
-    start_time = time.time()
-    
-    response = client.post("/generate", json={
-        "prompt": "Short test",
-        "max_tokens": 20,
-        "stream": False
-    })
-    
-    response_time = time.time() - start_time
-    
-    assert response.status_code == 200
-    assert response_time < 5.0  # Should respond within 5 seconds
-```
-
-## Integration Testing
-
-### End-to-End Tests
-Test complete workflows:
-
-```python
-def test_complete_workflow():
-    """Test complete API workflow"""
-    # 1. Check health
-    health_response = client.get("/health")
-    assert health_response.status_code == 200
-    
-    # 2. Get model info
-    model_response = client.get("/models/info")
-    assert model_response.status_code == 200
-    
-    # 3. Generate text
-    generate_response = client.post("/generate", json={
-        "prompt": "Write a haiku about coding",
-        "max_tokens": 50,
-        "stream": False
-    })
-    assert generate_response.status_code == 200
-    
-    # 4. Verify response
-    data = generate_response.json()
-    assert "text" in data
-    assert len(data["text"]) > 0
-```
-
-### Redis Integration Tests
-Test caching functionality:
-
-```python
-def test_redis_caching():
-    """Test Redis caching works correctly"""
-    prompt = "Test caching prompt"
-    
-    # First request (should cache)
-    response1 = client.post("/generate", json={
-        "prompt": prompt,
-        "stream": False
-    })
-    assert response1.status_code == 200
-    
-    # Second request (should use cache)
-    response2 = client.post("/generate", json={
-        "prompt": prompt,
-        "stream": False
-    })
-    assert response2.status_code == 200
-    
-    # Responses should be identical
-    assert response1.json() == response2.json()
-```
-
-## Test Configuration
-
-### Test Environment Setup
-Configure test environment:
-
-```python
-import os
-import tempfile
-from unittest.mock import patch
-
-@pytest.fixture
-def test_env():
-    """Set up test environment variables"""
-    test_env_vars = {
-        "MODEL_PATH": "models/test-model.gguf",
-        "GPU_LAYERS": "0",  # Use CPU for testing
-        "REDIS_HOST": "localhost",
-        "REDIS_PORT": "6379",
-        "DEBUG": "true"
-    }
-    
-    with patch.dict(os.environ, test_env_vars):
-        yield test_env_vars
-
-@pytest.fixture
-def test_client():
-    """Create test client with mocked dependencies"""
-    with patch('main.llm') as mock_llm:
-        mock_llm.return_value = {
-            "choices": [{"text": "Test response"}]
-        }
-        yield TestClient(app)
+@pytest.mark.asyncio
+async def test_streaming_generation():
+    async with httpx.AsyncClient() as client:
+        async with client.stream("POST", "/generate", json=request_data) as response:
+            async for line in response.aiter_lines():
+                if line.startswith("data: "):
+                    data = json.loads(line[6:])
+                    assert "token" in data
 ```
 
 ### Mocking External Dependencies
-Mock external services for isolated testing:
 
-```python
-from unittest.mock import patch, MagicMock
+- Mock Redis operations for unit tests
+- Mock model loading for faster test execution
+- Use fixtures for common test data
+- Isolate tests from external services
 
-@patch('redis.Redis')
-def test_without_redis(mock_redis):
-    """Test application works without Redis"""
-    mock_redis.side_effect = Exception("Redis not available")
-    
-    # Test that app still works
-    response = client.get("/health")
-    assert response.status_code == 200
-    assert response.json()["redis_connected"] == False
+### Integration Testing
+
+- Test full API flow from request to response
+- Verify streaming functionality end-to-end
+- Test caching behavior with real Redis
+- Validate error handling and recovery
+
+### Performance Testing
+
+- Measure token generation rate
+- Test memory usage under load
+- Verify cache hit rates
+- Monitor response latency
+
+## Test Automation
+
+Use Task commands for testing:
+
+```bash
+task test           # Run all tests
+task test:health    # Health check tests only
+task test:model     # Model-specific tests
+task test:generate  # Generation tests
 ```
 
 ## Test Data Management
 
-### Test Prompts
-Use consistent test prompts:
-
-```python
-TEST_PROMPTS = {
-    "short": "Hello",
-    "medium": "Write a short story about a robot",
-    "long": "Explain the principles of machine learning in detail",
-    "code": "Write a Python function to sort a list",
-    "creative": "Create a poem about artificial intelligence"
-}
-
-def test_various_prompts():
-    """Test API with various prompt types"""
-    for prompt_type, prompt in TEST_PROMPTS.items():
-        response = client.post("/generate", json={
-            "prompt": prompt,
-            "max_tokens": 50,
-            "stream": False
-        })
-        assert response.status_code == 200
-```
-
-### Expected Results
-Define expected behavior for tests:
-
-```python
-EXPECTED_RESPONSE_KEYS = ["text", "tokens_generated", "generation_time"]
-EXPECTED_HEALTH_KEYS = ["status", "model_loaded", "redis_connected"]
-EXPECTED_MODEL_KEYS = ["model_path", "context_size", "gpu_layers", "batch_size"]
-
-def test_response_structure():
-    """Test response has expected structure"""
-    response = client.post("/generate", json={
-        "prompt": "Test",
-        "stream": False
-    })
-    
-    data = response.json()
-    for key in EXPECTED_RESPONSE_KEYS:
-        assert key in data
-```
+- Use realistic prompts for testing
+- Include edge cases (empty prompts, very long prompts)
+- Test different parameter combinations
+- Validate response formats and schemas
 
 ## Continuous Integration
 
-### GitHub Actions
-Configure automated testing:
-
-```yaml
-# .github/workflows/test.yml
-name: Tests
-on: [push, pull_request]
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-      - name: Run tests
-        run: python -m pytest test_api.py -v
-```
-
-### Test Coverage
-Monitor test coverage:
-
-```bash
-# Install coverage tool
-pip install pytest-cov
-
-# Run tests with coverage
-pytest --cov=main test_api.py
-
-# Generate coverage report
-pytest --cov=main --cov-report=html test_api.py
-```
+- Automated testing on code changes
+- GPU availability testing
+- Docker container testing
+- Performance regression detection

@@ -1,65 +1,50 @@
 ---
 alwaysApply: true
-description: Project structure and architecture guide for LLM inference pipeline
+description: Project structure and architecture guide for the Local LLM Inference Pipeline
 ---
 
 # Project Structure Guide
 
-This is a **Local LLM Inference Pipeline** optimized for RTX 4060 with 8GB VRAM, featuring FastAPI streaming, Redis caching, and Vue.js frontend.
+This is a **Local LLM Inference Pipeline** built with FastAPI, featuring Llama-2-7b inference on RTX 4060 with Redis caching and Vue.js frontend.
 
 ## Core Architecture
 
-The main entry point is [main.py](mdc:main.py), which provides:
-- FastAPI web service with streaming support
-- Llama-2-7b model inference via llama-cpp-python
-- Redis caching for performance optimization
-- Server-Sent Events for real-time token streaming
+- **Main Entry Point**: [main.py](mdc:main.py) - FastAPI application with streaming LLM inference
+- **Task Automation**: [Taskfile.yml](mdc:Taskfile.yml) - Complete task automation for setup, testing, and deployment
+- **Model Setup**: [setup_model.py](mdc:setup_model.py) - Automated model download with fallbacks
+- **Environment Setup**: [setup_env.py](mdc:setup_env.py) - System dependencies and environment configuration
+- **Testing Suite**: [test_api.py](mdc:test_api.py) - Comprehensive API testing
 
-## Key Files and Their Roles
+## Key Directories
 
-### Core Application
-- **[main.py](mdc:main.py)** - Main FastAPI application with LLM inference endpoints
-- **[test_api.py](mdc:test_api.py)** - Comprehensive testing suite (6/6 tests passing)
-- **[requirements.txt](mdc:requirements.txt)** - Python dependencies with CUDA support
+- **docker/**: Multi-service Docker deployment with Redis caching
+  - [docker-compose.yml](mdc:docker/docker-compose.yml) - Main service orchestration
+  - [Dockerfile](mdc:docker/Dockerfile) - Container configuration
+- **frontend/**: Vue.js web interface
+  - [index.html](mdc:frontend/index.html) - Single-page application
+- **venv/**: Python virtual environment (auto-created)
+- **models/**: Downloaded LLM models (auto-created)
 
-### Setup and Configuration
-- **[setup_model.py](mdc:setup_model.py)** - Automated model download and quantization setup
-- **[setup_env.py](mdc:setup_env.py)** - Environment configuration management
-- **[setup_environment.sh](mdc:setup_environment.sh)** - System dependencies setup script
-- **[env.example](mdc:env.example)** - Environment variables template
+## Technology Stack
 
-### Deployment
-- **[docker-compose.yml](mdc:docker-compose.yml)** - Multi-service setup with Redis and LLM API
-- **[Dockerfile](mdc:Dockerfile)** - Container configuration for LLM service
+- **Backend**: FastAPI with async/await patterns
+- **LLM**: llama-cpp-python with CUDA support
+- **Caching**: Redis with async support
+- **Frontend**: Vue.js with Server-Sent Events
+- **Deployment**: Docker Compose with multi-service setup
+- **Task Management**: Task (taskfile.dev) for automation
 
-### Frontend
-- **[frontend/index.html](mdc:frontend/index.html)** - Vue.js web interface for testing
+## Development Workflow
 
-## Directory Structure
-```
-llm-godo/
-├── main.py                 # 🚀 Core API application
-├── test_api.py            # 🧪 Comprehensive testing suite
-├── setup_model.py         # 📥 Model setup (with automatic fallbacks)
-├── setup_env.py           # 🔧 Environment configuration
-├── setup_environment.sh   # 🛠️ System dependencies setup
-├── requirements.txt       # 📦 Python dependencies
-├── env.example           # 📝 Environment template
-├── Dockerfile            # 🐳 Container setup
-├── docker-compose.yml    # 🐳 Multi-service setup
-├── README.md             # 📖 Documentation
-└── frontend/             # 🎨 Web interface
-    └── index.html
-```
+1. Use `task` commands for all operations (see [Taskfile.yml](mdc:Taskfile.yml))
+2. Environment setup: `task setup`
+3. Start services: `task start`
+4. Run tests: `task test`
+5. Docker deployment: `task docker:up`
 
-## Model Configuration
-- **Primary Model**: Llama-2-7b with Q4_K_M quantization
-- **Fallback Models**: Pre-converted GGUF and TinyLlama for testing
-- **GPU Optimization**: Configured for RTX 4060 (8GB VRAM) with 20 GPU layers
-- **Performance**: 5.4 tokens/second (verified), ~6GB VRAM usage, 209x cache speedup
+## Performance Characteristics
 
-## Service Architecture
-- **FastAPI Service**: Handles HTTP requests and streaming responses
-- **Redis Service**: Active caching layer with 209x speed improvement on repeated requests
-- **Model Service**: llama-cpp-python for efficient local inference
-- **Frontend Service**: Vue.js interface for testing and interaction
+- **Target Hardware**: NVIDIA RTX 4060 (8GB VRAM)
+- **Performance**: ~5.4 tokens/sec verified
+- **Caching**: 209x speed improvement on repeated requests
+- **Streaming**: Real-time token generation via Server-Sent Events

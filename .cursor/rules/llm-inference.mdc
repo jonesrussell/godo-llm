@@ -1,0 +1,107 @@
+---
+globs: *.py
+description: LLM inference patterns and GPU optimization guidelines
+---
+
+# LLM Inference Patterns
+
+## Model Loading & Management
+
+The project uses `llama-cpp-python` for local LLM inference:
+
+### Model Configuration
+
+```python
+# From main.py - Model initialization
+model = Llama(
+    model_path=model_path,
+    n_ctx=2048,           # Context window
+    n_gpu_layers=-1,      # Use all GPU layers
+    verbose=False,        # Reduce logging
+    n_threads=4           # CPU threads
+)
+```
+
+### GPU Optimization
+
+- **Target Hardware**: NVIDIA RTX 4060 (8GB VRAM)
+- **Quantization**: Q4_K_M for optimal performance/size balance
+- **GPU Layers**: Use all available GPU layers (`n_gpu_layers=-1`)
+- **Memory Management**: Monitor VRAM usage to prevent OOM
+
+### Streaming Generation
+
+```python
+async def generate_stream(request: GenerateRequest):
+    # Async generator for token streaming
+    async for token in model.generate(
+        request.prompt,
+        max_tokens=request.max_tokens,
+        temperature=request.temperature,
+        stream=True
+    ):
+        yield f"data: {json.dumps({'token': token})}\n\n"
+```
+
+## Caching Strategy
+
+### Redis Integration
+
+- Cache generated responses by prompt hash
+- 209x speed improvement on repeated requests
+- Async Redis operations for non-blocking performance
+- TTL-based cache expiration
+
+### Cache Key Strategy
+
+```python
+# Generate deterministic cache key
+cache_key = f"llm:{hashlib.md5(prompt.encode()).hexdigest()}"
+```
+
+## Performance Monitoring
+
+### Metrics Collection
+
+- Token generation rate (~5.4 tokens/sec verified)
+- Response latency measurement
+- GPU memory usage tracking
+- Cache hit rate monitoring
+
+### Error Handling
+
+- Graceful fallback to CPU if GPU unavailable
+- Model loading retry logic
+- Memory overflow protection
+- Client disconnection handling
+
+## Model Setup & Fallbacks
+
+The [setup_model.py](mdc:setup_model.py) implements a robust fallback system:
+
+1. **Primary**: Llama-2-7b (requires Hugging Face token)
+2. **Fallback 1**: Pre-converted GGUF model (no conversion needed)
+3. **Fallback 2**: TinyLlama test model (no license required)
+
+### Model Download Patterns
+
+- Automatic model detection and download
+- Progress tracking for large downloads
+- Checksum verification for integrity
+- Graceful degradation for different scenarios
+
+## Configuration Management
+
+### Environment Variables
+
+- `MODEL_PATH`: Path to model file
+- `CUDA_VISIBLE_DEVICES`: GPU selection
+- `MAX_CONTEXT_LENGTH`: Context window size
+- `CACHE_TTL`: Redis cache expiration
+
+### Runtime Configuration
+
+- Dynamic parameter adjustment
+- Temperature and top-p tuning
+- Max tokens configuration
+- Streaming vs batch generation modes
