@@ -394,12 +394,26 @@ async def general_exception_handler(request: Request, exc: Exception):
     )
 
 
+# Mount static files for the frontend
+app.mount("/assets", StaticFiles(directory="frontend/dist/assets"), name="assets")
+
 # Routes
+@app.get("/vite.svg")
+async def vite_svg():
+    """Serve the vite.svg favicon."""
+    try:
+        with open("frontend/dist/vite.svg", "r") as f:
+            from fastapi.responses import Response
+            return Response(content=f.read(), media_type="image/svg+xml")
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="vite.svg not found")
+
+
 @app.get("/", response_class=HTMLResponse)
 async def root():
     """Serve the Vue.js frontend."""
     try:
-        with open("frontend/index.html", "r") as f:
+        with open("frontend/dist/index.html", "r") as f:
             return HTMLResponse(content=f.read(), status_code=200)
     except FileNotFoundError:
         return HTMLResponse(
@@ -409,7 +423,7 @@ async def root():
                     <h1>Local LLM Inference API</h1>
                     <p>Status: Running</p>
                     <p>Version: 1.0.0</p>
-                    <p>Frontend not found. Please check the frontend directory.</p>
+                    <p>Frontend not found. Please run 'npm run build' in the frontend directory.</p>
                 </body>
             </html>
             """,
