@@ -1,8 +1,8 @@
 <template>
   <div class="container">
     <div class="header">
-      <h1>🤖 Local LLM Inference</h1>
-      <p>Test your local Llama-2-7b model with real-time streaming</p>
+      <h1>🤖 Multi-Model LLM Inference</h1>
+      <p>Test local GGUF models and Hugging Face models with real-time streaming</p>
     </div>
 
     <div class="input-section">

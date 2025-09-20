@@ -1,7 +1,7 @@
 {
   "name": "godo-llm",
   "version": "1.0.0",
-  "description": "A complete local inference solution for Llama-2-7b on RTX 4060 with 8GB VRAM. Features FastAPI streaming, Redis caching, and a beautiful Vue.js frontend.",
+  "description": "A complete multi-model LLM inference solution supporting local GGUF models and Hugging Face models. Features FastAPI streaming, Redis caching, and a beautiful Vue.js frontend.",
   "main": "index.js",
   "scripts": {
     "dev": "vite",
