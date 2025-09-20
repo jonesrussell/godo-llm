@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Redirecting to Vue.js App</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        .container {
+            text-align: center;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 40px;
+            border-radius: 20px;
+            backdrop-filter: blur(10px);
+        }
+        .btn {
+            display: inline-block;
+            padding: 15px 30px;
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            text-decoration: none;
+            border-radius: 10px;
+            margin: 10px;
+            transition: all 0.3s ease;
+        }
+        .btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: translateY(-2px);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 Local LLM Inference</h1>
+        <p>Your Vue.js frontend is running on port 3000</p>
+        <p>Make sure you're accessing the correct URL:</p>
+        <a href="http://localhost:3000" class="btn">Open Vue.js App (Port 3000)</a>
+        <a href="http://localhost:8001/docs" class="btn">API Documentation (Port 8001)</a>
+        <p style="margin-top: 30px; font-size: 14px; opacity: 0.8;">
+            If you're seeing this page, you might be on the wrong port.<br>
+            The Vue.js app runs on port 3000, not 8081 or 8080.
+        </p>
+    </div>
+</body>
+</html>
