@@ -173,10 +173,28 @@ tasks:
       - echo "✅ Redis server started"
 
   "start:frontend":
-    desc: "Start frontend development server"
+    desc: "Start Vue.js development server"
     cmds:
-      - echo "🎨 Starting frontend server..."
+      - echo "🎨 Starting Vue.js development server..."
+      - npm run dev
+
+  "start:frontend:old":
+    desc: "Start old frontend server (static)"
+    cmds:
+      - echo "🎨 Starting static frontend server..."
       - cd frontend && {{.PYTHON}} -m http.server 8080
+
+  "frontend:build":
+    desc: "Build frontend for production"
+    cmds:
+      - echo "🏗️  Building Vue.js frontend..."
+      - npm run build
+
+  "frontend:serve":
+    desc: "Serve built frontend"
+    cmds:
+      - echo "🌐 Serving built frontend..."
+      - npm run serve
 
   dev:
     desc: "Start development environment (Redis + API + Frontend)"
@@ -184,10 +202,11 @@ tasks:
     cmds:
       - "echo 🔧 Starting development environment..."
       - "echo Redis: http://localhost:6379"
-      - "echo API: http://localhost:8000" 
-      - "echo Frontend: http://localhost:8080"
+      - "echo API: http://localhost:8001" 
+      - "echo Frontend: http://localhost:3000"
       - "echo"
       - "echo Starting API server..."
+      - "echo Run 'task start:frontend' in another terminal for Vue.js dev server"
       - "{{.VENV_DIR}}/bin/{{.PYTHON}} main.py"
 
   # =============================================================================
