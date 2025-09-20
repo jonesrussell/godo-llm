@@ -12,7 +12,8 @@ import os
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from typing import Any, AsyncGenerator, Dict, List, Optional, Union
+from enum import Enum
 
 import redis.asyncio as redis
 from fastapi import FastAPI, HTTPException, Request, status
@@ -23,6 +24,15 @@ from llama_cpp import Llama
 from pydantic import BaseModel, Field, field_validator
 from sse_starlette.sse import EventSourceResponse
 
+# Hugging Face imports
+import torch
+from transformers import (
+    AutoTokenizer, AutoModelForCausalLM, 
+    TextIteratorStreamer, pipeline
+)
+from threading import Thread
+from queue import Queue
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -30,11 +40,23 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Enums
+class ModelProvider(str, Enum):
+    """Available model providers."""
+    LOCAL = "local"
+    HUGGINGFACE = "huggingface"
+
+
 # Configuration
 class Config:
     """Application configuration."""
     
-    # Model settings - will be auto-detected
+    # Model provider settings
+    DEFAULT_PROVIDER: ModelProvider = ModelProvider(os.getenv("DEFAULT_PROVIDER", "local"))
+    HUGGINGFACE_MODEL_NAME: str = os.getenv("HUGGINGFACE_MODEL_NAME", "microsoft/DialoGPT-medium")
+    HUGGINGFACE_CACHE_DIR: str = os.getenv("HUGGINGFACE_CACHE_DIR", "./hf_cache")
+    
+    # Local model settings - will be auto-detected
     MODEL_PATH: str = os.getenv("MODEL_PATH", "")
     GPU_LAYERS: int = int(os.getenv("GPU_LAYERS", "20"))
     MODEL_CONTEXT_SIZE: int = int(os.getenv("MODEL_CONTEXT_SIZE", "2048"))
@@ -107,6 +129,10 @@ class GenerateRequest(BaseModel):
         default=None,
         description="Custom cache key"
     )
+    provider: Optional[ModelProvider] = Field(
+        default=None,
+        description="Model provider to use (overrides default)"
+    )
     
     @field_validator('stop')
     @classmethod
@@ -129,7 +155,9 @@ class HealthResponse(BaseModel):
     """Health check response model."""
     
     status: str
-    model_loaded: bool
+    current_provider: ModelProvider
+    local_model_loaded: bool
+    huggingface_model_loaded: bool
     redis_connected: bool
     uptime: float
 
@@ -137,11 +165,31 @@ class HealthResponse(BaseModel):
 class ModelInfoResponse(BaseModel):
     """Model information response."""
     
-    model_path: str
-    context_size: int
-    gpu_layers: int
-    batch_size: int
-    model_loaded: bool
+    current_provider: ModelProvider
+    available_providers: List[ModelProvider]
+    
+    # Local model info
+    local_model_path: Optional[str] = None
+    context_size: Optional[int] = None
+    gpu_layers: Optional[int] = None
+    batch_size: Optional[int] = None
+    local_model_loaded: bool = False
+    
+    # Hugging Face model info
+    huggingface_model_name: Optional[str] = None
+    huggingface_model_loaded: bool = False
+    device: Optional[str] = None
+    torch_dtype: Optional[str] = None
+
+
+class SwitchProviderRequest(BaseModel):
+    """Request model for switching model providers."""
+    
+    provider: ModelProvider = Field(..., description="Provider to switch to")
+    huggingface_model_name: Optional[str] = Field(
+        default=None,
+        description="Hugging Face model name (only for HF provider)"
+    )
 
 
 class ErrorResponse(BaseModel):
@@ -157,14 +205,26 @@ class AppState:
     """Application state container."""
     
     def __init__(self):
-        self.llm: Optional[Llama] = None
+        self.local_llm: Optional[Llama] = None
+        self.hf_model: Optional[Any] = None
+        self.hf_tokenizer: Optional[Any] = None
+        self.current_provider: ModelProvider = config.DEFAULT_PROVIDER
         self.redis_client: Optional[redis.Redis] = None
         self.start_time: float = time.time()
         self.redis_available: bool = False
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
     
     @property
     def uptime(self) -> float:
         return time.time() - self.start_time
+    
+    @property
+    def active_model(self) -> Optional[Union[Llama, Any]]:
+        """Get the currently active model based on provider."""
+        if self.current_provider == ModelProvider.LOCAL:
+            return self.local_llm
+        else:
+            return self.hf_model
 
 
 app_state = AppState()
@@ -283,8 +343,8 @@ class LLMManager:
         )
     
     @staticmethod
-    def initialize_model() -> Llama:
-        """Initialize the LLM model."""
+    def initialize_local_model() -> Llama:
+        """Initialize the local LLM model."""
         # Auto-detect model if not specified
         if not config.MODEL_PATH:
             config.MODEL_PATH = LLMManager.find_available_model()
@@ -295,7 +355,7 @@ class LLMManager:
                 "Please run setup_model.py first."
             )
         
-        logger.info(f"Loading model from {config.MODEL_PATH}")
+        logger.info(f"Loading local model from {config.MODEL_PATH}")
         logger.info(f"GPU layers: {config.GPU_LAYERS}, Context: {config.MODEL_CONTEXT_SIZE}")
         
         try:
@@ -306,10 +366,145 @@ class LLMManager:
                 n_batch=config.MODEL_BATCH_SIZE,
                 verbose=False
             )
-            logger.info("Model loaded successfully")
+            logger.info("Local model loaded successfully")
             return llm
         except Exception as e:
-            logger.error(f"Failed to load model: {e}")
+            logger.error(f"Failed to load local model: {e}")
+            raise
+
+
+class HuggingFaceManager:
+    """Manages Hugging Face model initialization and operations."""
+    
+    @staticmethod
+    def initialize_hf_model(model_name: str = None) -> tuple[Any, Any]:
+        """Initialize Hugging Face model and tokenizer."""
+        model_name = model_name or config.HUGGINGFACE_MODEL_NAME
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        
+        logger.info(f"Loading Hugging Face model: {model_name}")
+        logger.info(f"Device: {device}")
+        
+        try:
+            # Load tokenizer
+            tokenizer = AutoTokenizer.from_pretrained(
+                model_name,
+                cache_dir=config.HUGGINGFACE_CACHE_DIR
+            )
+            
+            # Fix tokenizer for DialoGPT models
+            if tokenizer.pad_token is None:
+                tokenizer.pad_token = tokenizer.eos_token
+            
+            # Load model
+            model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                cache_dir=config.HUGGINGFACE_CACHE_DIR,
+                torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+                device_map="auto" if device == "cuda" else None,
+                low_cpu_mem_usage=True
+            )
+            
+            if device == "cpu":
+                model = model.to(device)
+            
+            logger.info("Hugging Face model loaded successfully")
+            return model, tokenizer
+            
+        except Exception as e:
+            logger.error(f"Failed to load Hugging Face model: {e}")
+            raise
+    
+    @staticmethod
+    def generate_hf_streaming(
+        model: Any, 
+        tokenizer: Any, 
+        prompt: str, 
+        max_tokens: int, 
+        temperature: float, 
+        top_p: float, 
+        stop: List[str]
+    ) -> AsyncGenerator[str, None]:
+        """Generate text with Hugging Face model using streaming."""
+        device = next(model.parameters()).device
+        
+        # Tokenize input
+        inputs = tokenizer(prompt, return_tensors="pt").to(device)
+        
+        # Create streamer
+        streamer = TextIteratorStreamer(
+            tokenizer, 
+            timeout=10.0, 
+            skip_special_tokens=True
+        )
+        
+        # Generation parameters
+        generation_kwargs = {
+            "max_new_tokens": max_tokens,
+            "temperature": temperature,
+            "top_p": top_p,
+            "do_sample": temperature > 0,
+            "pad_token_id": tokenizer.pad_token_id,
+            "eos_token_id": tokenizer.eos_token_id,
+            "repetition_penalty": 1.1,  # Prevent repetitive outputs
+            "no_repeat_ngram_size": 3,  # Prevent 3-gram repetition
+            "streamer": streamer,
+        }
+        
+        # Start generation in a separate thread
+        generation_kwargs.update(inputs)
+        thread = Thread(target=model.generate, kwargs=generation_kwargs)
+        thread.start()
+        
+        # Stream tokens
+        try:
+            for token in streamer:
+                yield token
+        except Exception as e:
+            logger.error(f"Hugging Face streaming error: {e}")
+            raise
+        finally:
+            thread.join()
+    
+    @staticmethod
+    def generate_hf_non_streaming(
+        model: Any, 
+        tokenizer: Any, 
+        prompt: str, 
+        max_tokens: int, 
+        temperature: float, 
+        top_p: float, 
+        stop: List[str]
+    ) -> str:
+        """Generate text with Hugging Face model without streaming."""
+        device = next(model.parameters()).device
+        
+        # Tokenize input
+        inputs = tokenizer(prompt, return_tensors="pt").to(device)
+        
+        # Generation parameters
+        generation_kwargs = {
+            "max_new_tokens": max_tokens,
+            "temperature": temperature,
+            "top_p": top_p,
+            "do_sample": temperature > 0,
+            "pad_token_id": tokenizer.pad_token_id,
+            "eos_token_id": tokenizer.eos_token_id,
+            "repetition_penalty": 1.1,  # Prevent repetitive outputs
+            "no_repeat_ngram_size": 3,  # Prevent 3-gram repetition
+        }
+        
+        try:
+            # Generate
+            with torch.no_grad():
+                outputs = model.generate(**inputs, **generation_kwargs)
+            
+            # Decode response
+            response = tokenizer.decode(outputs[0][inputs['input_ids'].shape[1]:], skip_special_tokens=True)
+            return response
+            
+        except Exception as e:
+            logger.error(f"Hugging Face generation error: {e}")
             raise
 
 
@@ -324,10 +519,42 @@ async def lifespan(app: FastAPI):
         # Initialize Redis
         app_state.redis_client = await RedisManager.initialize()
         
-        # Initialize LLM
-        app_state.llm = LLMManager.initialize_model()
+        # Initialize local model (if available)
+        try:
+            app_state.local_llm = LLMManager.initialize_local_model()
+            logger.info("Local model initialized successfully")
+        except Exception as e:
+            logger.warning(f"Failed to initialize local model: {e}")
+            app_state.local_llm = None
         
-        logger.info("Service startup completed successfully")
+        # Initialize Hugging Face model (if available)
+        try:
+            app_state.hf_model, app_state.hf_tokenizer = HuggingFaceManager.initialize_hf_model()
+            logger.info("Hugging Face model initialized successfully")
+        except Exception as e:
+            logger.warning(f"Failed to initialize Hugging Face model: {e}")
+            app_state.hf_model = None
+            app_state.hf_tokenizer = None
+        
+        # Validate that at least one model is available
+        if not app_state.local_llm and not app_state.hf_model:
+            raise RuntimeError("No models could be initialized. Please check your configuration.")
+        
+        # Set default provider based on availability
+        if app_state.current_provider == ModelProvider.LOCAL and not app_state.local_llm:
+            if app_state.hf_model:
+                app_state.current_provider = ModelProvider.HUGGINGFACE
+                logger.info("Switching to Hugging Face provider (local model unavailable)")
+            else:
+                raise RuntimeError("No models available for the configured provider")
+        elif app_state.current_provider == ModelProvider.HUGGINGFACE and not app_state.hf_model:
+            if app_state.local_llm:
+                app_state.current_provider = ModelProvider.LOCAL
+                logger.info("Switching to local provider (Hugging Face model unavailable)")
+            else:
+                raise RuntimeError("No models available for the configured provider")
+        
+        logger.info(f"Service startup completed successfully with provider: {app_state.current_provider}")
         
     except Exception as e:
         logger.error(f"Startup failed: {e}")
@@ -341,8 +568,14 @@ async def lifespan(app: FastAPI):
     if app_state.redis_client:
         await RedisManager.close(app_state.redis_client)
     
-    if app_state.llm:
-        del app_state.llm
+    if app_state.local_llm:
+        del app_state.local_llm
+    
+    if app_state.hf_model:
+        del app_state.hf_model
+    
+    if app_state.hf_tokenizer:
+        del app_state.hf_tokenizer
     
     logger.info("Service shutdown completed")
 
@@ -453,9 +686,15 @@ async def health_check():
         except Exception:
             redis_connected = False
     
+    # Determine overall health status
+    has_model = app_state.local_llm is not None or app_state.hf_model is not None
+    status = "healthy" if has_model else "degraded"
+    
     return HealthResponse(
-        status="healthy" if app_state.llm else "degraded",
-        model_loaded=app_state.llm is not None,
+        status=status,
+        current_provider=app_state.current_provider,
+        local_model_loaded=app_state.local_llm is not None,
+        huggingface_model_loaded=app_state.hf_model is not None,
         redis_connected=redis_connected,
         uptime=app_state.uptime
     )
@@ -464,33 +703,143 @@ async def health_check():
 @app.get("/models/info", response_model=ModelInfoResponse)
 async def model_info():
     """Get model information."""
-    if not app_state.llm:
+    if not app_state.local_llm and not app_state.hf_model:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Model not loaded"
+            detail="No models loaded"
         )
     
+    available_providers = []
+    if app_state.local_llm:
+        available_providers.append(ModelProvider.LOCAL)
+    if app_state.hf_model:
+        available_providers.append(ModelProvider.HUGGINGFACE)
+    
     return ModelInfoResponse(
-        model_path=config.MODEL_PATH,
-        context_size=config.MODEL_CONTEXT_SIZE,
-        gpu_layers=config.GPU_LAYERS,
-        batch_size=config.MODEL_BATCH_SIZE,
-        model_loaded=True
+        current_provider=app_state.current_provider,
+        available_providers=available_providers,
+        local_model_path=config.MODEL_PATH if app_state.local_llm else None,
+        context_size=config.MODEL_CONTEXT_SIZE if app_state.local_llm else None,
+        gpu_layers=config.GPU_LAYERS if app_state.local_llm else None,
+        batch_size=config.MODEL_BATCH_SIZE if app_state.local_llm else None,
+        local_model_loaded=app_state.local_llm is not None,
+        huggingface_model_name=config.HUGGINGFACE_MODEL_NAME if app_state.hf_model else None,
+        huggingface_model_loaded=app_state.hf_model is not None,
+        device=str(app_state.device) if app_state.hf_model else None,
+        torch_dtype=str(app_state.hf_model.dtype) if app_state.hf_model else None
     )
+
+
+@app.post("/models/switch-provider", response_model=ModelInfoResponse)
+async def switch_provider(request: SwitchProviderRequest):
+    """Switch between model providers at runtime."""
+    # Validate provider availability
+    if request.provider == ModelProvider.LOCAL and not app_state.local_llm:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Local model not available"
+        )
+    
+    if request.provider == ModelProvider.HUGGINGFACE and not app_state.hf_model:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Hugging Face model not available"
+        )
+    
+    # Switch provider
+    old_provider = app_state.current_provider
+    app_state.current_provider = request.provider
+    
+    # If switching to HF and a different model is requested, reload
+    if (request.provider == ModelProvider.HUGGINGFACE and 
+        request.huggingface_model_name and 
+        request.huggingface_model_name != config.HUGGINGFACE_MODEL_NAME):
+        
+        try:
+            logger.info(f"Loading new Hugging Face model: {request.huggingface_model_name}")
+            
+            # Clean up old model
+            if app_state.hf_model:
+                del app_state.hf_model
+            if app_state.hf_tokenizer:
+                del app_state.hf_tokenizer
+            
+            # Load new model
+            app_state.hf_model, app_state.hf_tokenizer = HuggingFaceManager.initialize_hf_model(
+                request.huggingface_model_name
+            )
+            config.HUGGINGFACE_MODEL_NAME = request.huggingface_model_name
+            
+        except Exception as e:
+            # Revert on failure
+            app_state.current_provider = old_provider
+            logger.error(f"Failed to load new Hugging Face model: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to load model: {str(e)}"
+            )
+    
+    logger.info(f"Switched from {old_provider} to {request.provider} provider")
+    
+    # Return updated model info
+    return await model_info()
+
+
+@app.get("/models/providers")
+async def get_available_providers():
+    """Get list of available model providers."""
+    providers = []
+    
+    if app_state.local_llm:
+        providers.append({
+            "name": ModelProvider.LOCAL,
+            "display_name": "Local Model",
+            "description": "Local GGUF model via llama-cpp-python",
+            "model_path": config.MODEL_PATH,
+            "context_size": config.MODEL_CONTEXT_SIZE,
+            "gpu_layers": config.GPU_LAYERS
+        })
+    
+    if app_state.hf_model:
+        providers.append({
+            "name": ModelProvider.HUGGINGFACE,
+            "display_name": "Hugging Face",
+            "description": "Hugging Face model via transformers",
+            "model_name": config.HUGGINGFACE_MODEL_NAME,
+            "device": str(app_state.device),
+            "torch_dtype": str(app_state.hf_model.dtype)
+        })
+    
+    return {
+        "current_provider": app_state.current_provider,
+        "available_providers": providers
+    }
 
 
 @app.post("/generate")
 async def generate(request: GenerateRequest):
     """Generate text with optional caching and streaming."""
-    if not app_state.llm:
+    # Determine which provider to use
+    provider = request.provider or app_state.current_provider
+    
+    # Validate provider availability
+    if provider == ModelProvider.LOCAL and not app_state.local_llm:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Model not loaded"
+            detail="Local model not available"
         )
     
-    # Generate cache key
+    if provider == ModelProvider.HUGGINGFACE and not app_state.hf_model:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Hugging Face model not available"
+        )
+    
+    # Generate cache key (include provider in cache key)
+    request_dict = request.dict()
+    request_dict["provider"] = provider
     cache_key = request.cache_key or CacheManager.generate_cache_key(
-        request.prompt, request.dict()
+        request.prompt, request_dict
     )
     
     # Check cache for non-streaming requests
@@ -503,11 +852,11 @@ async def generate(request: GenerateRequest):
     try:
         if request.stream:
             return EventSourceResponse(
-                stream_generation(request, cache_key),
+                stream_generation(request, cache_key, provider),
                 media_type="text/event-stream"
             )
         else:
-            return await generate_non_streaming(request, cache_key)
+            return await generate_non_streaming(request, cache_key, provider)
     except Exception as e:
         logger.error(f"Generation failed: {e}", exc_info=True)
         raise HTTPException(
@@ -518,7 +867,8 @@ async def generate(request: GenerateRequest):
 
 async def stream_generation(
     request: GenerateRequest, 
-    cache_key: str
+    cache_key: str,
+    provider: ModelProvider
 ) -> AsyncGenerator[Dict[str, str], None]:
     """Stream text generation with Server-Sent Events."""
     start_time = time.time()
@@ -526,32 +876,60 @@ async def stream_generation(
     token_count = 0
     
     try:
-        for token in app_state.llm(
-            prompt=request.prompt,
-            max_tokens=request.max_tokens,
-            temperature=request.temperature,
-            top_p=request.top_p,
-            top_k=request.top_k,
-            stop=request.stop or [],
-            echo=False,
-            stream=True
-        ):
-            token_text = token["choices"][0]["text"]
-            full_text += token_text
-            token_count += 1
-            
-            # Send token event
-            yield {
-                "event": "token",
-                "data": json.dumps({
-                    "token": token_text,
-                    "full_text": full_text,
-                    "token_count": token_count
-                })
-            }
-            
-            # Prevent overwhelming the client
-            await asyncio.sleep(config.STREAM_DELAY)
+        if provider == ModelProvider.LOCAL:
+            # Local model streaming
+            for token in app_state.local_llm(
+                prompt=request.prompt,
+                max_tokens=request.max_tokens,
+                temperature=request.temperature,
+                top_p=request.top_p,
+                top_k=request.top_k,
+                stop=request.stop or [],
+                echo=False,
+                stream=True
+            ):
+                token_text = token["choices"][0]["text"]
+                full_text += token_text
+                token_count += 1
+                
+                # Send token event
+                yield {
+                    "event": "token",
+                    "data": json.dumps({
+                        "token": token_text,
+                        "full_text": full_text,
+                        "token_count": token_count
+                    })
+                }
+                
+                # Prevent overwhelming the client
+                await asyncio.sleep(config.STREAM_DELAY)
+        
+        else:  # Hugging Face model streaming
+            async for token_text in HuggingFaceManager.generate_hf_streaming(
+                app_state.hf_model,
+                app_state.hf_tokenizer,
+                request.prompt,
+                request.max_tokens,
+                request.temperature,
+                request.top_p,
+                request.stop or []
+            ):
+                full_text += token_text
+                token_count += 1
+                
+                # Send token event
+                yield {
+                    "event": "token",
+                    "data": json.dumps({
+                        "token": token_text,
+                        "full_text": full_text,
+                        "token_count": token_count
+                    })
+                }
+                
+                # Prevent overwhelming the client
+                await asyncio.sleep(config.STREAM_DELAY)
         
         # Send completion event
         generation_time = time.time() - start_time
@@ -582,27 +960,44 @@ async def stream_generation(
 
 async def generate_non_streaming(
     request: GenerateRequest, 
-    cache_key: str
+    cache_key: str,
+    provider: ModelProvider
 ) -> GenerateResponse:
     """Generate text without streaming."""
     start_time = time.time()
     
     try:
-        result = app_state.llm(
-            prompt=request.prompt,
-            max_tokens=request.max_tokens,
-            temperature=request.temperature,
-            top_p=request.top_p,
-            top_k=request.top_k,
-            stop=request.stop or [],
-            echo=False,
-            stream=False
-        )
+        if provider == ModelProvider.LOCAL:
+            # Local model non-streaming
+            result = app_state.local_llm(
+                prompt=request.prompt,
+                max_tokens=request.max_tokens,
+                temperature=request.temperature,
+                top_p=request.top_p,
+                top_k=request.top_k,
+                stop=request.stop or [],
+                echo=False,
+                stream=False
+            )
+            
+            text = result["choices"][0]["text"]
+            # Better token counting - this is approximate
+            token_count = len(text.split())
+        
+        else:  # Hugging Face model non-streaming
+            text = HuggingFaceManager.generate_hf_non_streaming(
+                app_state.hf_model,
+                app_state.hf_tokenizer,
+                request.prompt,
+                request.max_tokens,
+                request.temperature,
+                request.top_p,
+                request.stop or []
+            )
+            # Better token counting - this is approximate
+            token_count = len(text.split())
         
         generation_time = time.time() - start_time
-        text = result["choices"][0]["text"]
-        # Better token counting - this is approximate
-        token_count = len(text.split())
         
         response = GenerateResponse(
             text=text,
